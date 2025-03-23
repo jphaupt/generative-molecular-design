@@ -1,0 +1,12 @@
+[project]
+name = "mygenai"
+version = "0.1.0"
+description = "Small toy project exploring applications of generative AI for molecular design"
+readme = "README.md"
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["mygenai"]
