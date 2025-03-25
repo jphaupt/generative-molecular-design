@@ -17,7 +17,7 @@ CHARGE2SYMBOL = {1: "H",
                  17: "Cl",
                  35: "Br",
                  53: "I",
-                 0: "X"
+                 0: "X" # unknown
                 }
 
 def get_molecular_formula(atomic_numbers):
