@@ -9,6 +9,42 @@ from rdkit.Chem import QED, Crippen, rdMolDescriptors, rdmolops
 from rdkit.Geometry.rdGeometry import Point3D
 import torch
 
+CHARGE2SYMBOL = {1: "H",
+                 6: "C",
+                 7: "N",
+                 8: "O",
+                 9: "F",
+                 17: "Cl",
+                 35: "Br",
+                 53: "I",
+                 0: "X"
+                }
+
+def get_molecular_formula(atomic_numbers):
+    """Generate a molecular formula string from atomic numbers"""
+    # Convert atomic numbers to symbols
+    symbols = [CHARGE2SYMBOL[int(num)] for num in atomic_numbers]
+
+    # Create a dictionary to count occurrences
+    element_counts = {}
+    for symbol in symbols:
+        if symbol in element_counts:
+            element_counts[symbol] += 1
+        else:
+            element_counts[symbol] = 1
+
+    # Standard element order: C, H first, then alphabetically
+    elements_order = ["C", "H"] + sorted(set(element_counts) - {"C", "H"})
+
+    # Construct formula string
+    formula = ""
+    for element in elements_order:
+        if element in element_counts:
+            count = element_counts[element]
+            formula += f"{element}{count if count > 1 else ''}"
+
+    return formula
+
 def moltosvg(mol,molSize=(450,150),kekulize=True):
     # taken from
     # https://rdkit.blogspot.com/2015/02/new-drawing-code.html
