@@ -1,4 +1,4 @@
-# general utility functions (primarily for data exploration)import rdkit
+# general utility functions (primarily for data exploration)
 import rdkit
 from rdkit.Chem import rdDepictor
 from rdkit.Chem.Draw import rdMolDraw2D
