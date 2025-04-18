@@ -1,6 +1,6 @@
 import logging
 import torch
-from torch.nn import Linear, ReLU, BatchNorm1d, Module, Sequential, Sigmoid
+from torch.nn import Linear, ReLU, BatchNorm1d, Module, Sequential, Sigmoid, Dropout
 
 class ConditionalDecoder(Module):
     def __init__(self, latent_dim=32, emb_dim=64, out_node_dim=11, out_edge_dim=4):
@@ -16,7 +16,9 @@ class ConditionalDecoder(Module):
             Linear(emb_dim, emb_dim),
             ReLU(),
             BatchNorm1d(emb_dim),
-            Linear(emb_dim, out_node_dim)
+            Linear(emb_dim, out_node_dim),
+            # Add tanh to bound outputs between -1 and 1
+            torch.nn.Tanh()
         )
 
         # Position generation
@@ -24,8 +26,14 @@ class ConditionalDecoder(Module):
             Linear(emb_dim, emb_dim),
             ReLU(),
             BatchNorm1d(emb_dim),
-            Linear(emb_dim, 3)
+            Linear(emb_dim, 3),
+            torch.nn.Tanh()
         )
+
+        # Add scaling parameters to match data range
+        self.node_scale = torch.nn.Parameter(torch.tensor(4.5))  # Approximately half of max(9.0)
+        self.node_shift = torch.nn.Parameter(torch.tensor(4.5))  # Center between 0-9
+        self.pos_scale = torch.nn.Parameter(torch.tensor(7.0))   # Approx max position range
 
         # Number of nodes predictor
         self.num_nodes_predictor = Sequential(
@@ -76,8 +84,12 @@ class ConditionalDecoder(Module):
             h_expanded = h[i:i+1].expand(n, -1)
 
             # Generate node features and positions
-            node_feat = self.node_decoder(h_expanded)
-            pos = self.pos_decoder(h_expanded)
+            node_feat = self.node_decoder(h_expanded)  # bounded to [-1, 1] by tanh
+            pos = self.pos_decoder(h_expanded)         # bounded to [-1, 1] by tanh
+
+            # Scale to match original data ranges
+            node_feat = node_feat * self.node_scale + self.node_shift  # Scale to [0, 9] range
+            pos = pos * self.pos_scale                                 # Scale to [-7, 7] range
 
             node_features_list.append(node_feat)
             positions_list.append(pos)

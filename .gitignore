@@ -176,4 +176,4 @@ cython_debug/
 
 # data produced by pytorch geometric
 data/
-notebooks/*.pt
+notebooks/best_vae_model_????????_??????.pt

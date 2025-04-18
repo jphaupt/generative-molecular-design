@@ -80,6 +80,21 @@ class PropertyConditionedVAE(Module):
                     property_pred, property_weight=1.0, recon_weight=1.0, kl_weight=0.1):
         logger = logging.getLogger(self.__class__.__name__)
 
+        # Check for value instability early
+        if torch.isnan(node_features).any() or torch.isnan(positions).any():
+            logger.error("NaN values detected in model outputs!")
+            return torch.tensor(1000.0, device=node_features.device, requires_grad=True)
+
+        # Check for extremely large values early
+        max_node_value = node_features.abs().max().item()
+        max_pos_value = positions.abs().max().item()
+        if max_node_value > 100 or max_pos_value > 100:
+            logger.error(f"Large values detected! Features: {max_node_value}, Positions: {max_pos_value}")
+            # Add debugging info to pinpoint the issue
+            logger.error(f"Node features range: {node_features.min().item()} to {node_features.max().item()}")
+            logger.error(f"Positions range: {positions.min().item()} to {positions.max().item()}")
+            return torch.tensor(1000.0, device=node_features.device, requires_grad=True)
+
         # Log shapes for debugging
         logger.debug(f"Property prediction shape: {property_pred.shape}")
         logger.debug(f"Target property shape: {data.y.shape}")
@@ -92,6 +107,10 @@ class PropertyConditionedVAE(Module):
         start_idx = 0
         total_nodes = 0
 
+        # Node feature and position losses with consistent handling
+        feature_loss = 0.0
+        position_loss = 0.0
+
         for i, n in enumerate(num_nodes):
             n_orig = (data.batch == i).sum()
             n_gen = n.item()
@@ -99,25 +118,28 @@ class PropertyConditionedVAE(Module):
             total_nodes += nodes_to_compare
 
             if nodes_to_compare > 0:
-                # Node feature reconstruction - use sum reduction
-                recon_loss += F.mse_loss(
+                # Split losses for better scaling
+                feature_loss += F.mse_loss(
                     node_features[start_idx:start_idx + nodes_to_compare],
                     data.x[data.batch == i][:nodes_to_compare],
-                    reduction='sum'  # Sum within each graph
+                    reduction='mean'  # Use mean within each graph
                 )
 
-                # Position reconstruction - use sum reduction
-                recon_loss += F.mse_loss(
+                position_loss += F.mse_loss(
                     positions[start_idx:start_idx + nodes_to_compare],
                     data.pos[data.batch == i][:nodes_to_compare],
-                    reduction='sum'  # Sum within each graph
+                    reduction='mean'  # Use mean within each graph
                 )
 
             start_idx += n_gen
 
-        # Normalize reconstruction loss by total nodes compared
-        if total_nodes > 0:
-            recon_loss = recon_loss / total_nodes
+        # Normalize by number of graphs (not total nodes)
+        feature_loss = feature_loss / batch_size
+        position_loss = position_loss / batch_size
+
+        # Weight the position loss differently than feature loss
+        # since positions have different scale than node features
+        recon_loss = feature_loss + 0.1 * position_loss
 
         # KL divergence (already normalized by batch size)
         kl_loss = -0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp()) / batch_size
