@@ -56,7 +56,7 @@ class PropertyConditionedVAE(Module):
 
         # Decode
         node_features, positions, num_nodes = self.decoder(
-            z, target_property, data.batch.max().item() + 1
+            z, decoder_property, data.batch.max().item() + 1
         )
         logger.debug(f"Decoder outputs - features: {node_features.shape}, positions: {positions.shape}")
 
