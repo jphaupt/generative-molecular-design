@@ -108,26 +108,17 @@ class PropertyConditionedVAE(Module):
         # KL divergence (already normalized by batch size)
         kl_loss = -0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp()) / batch_size
 
-        # # Property prediction loss - ensure shapes match
-        # if property_pred.shape != data.y.shape:
-        #     logger.warning(f"Property shape mismatch: pred={property_pred.shape}, target={data.y.shape}")
-        #     # Fix the shape of either property_pred or data.y to match
-        #     if property_pred.size(1) == 1 and data.y.size(1) > 1:
-        #         # Need to modify your model to output the correct shape (19 columns)
-        #         # As a temporary fix, repeat the single value to match the target width
-        #         property_pred = property_pred.expand(-1, data.y.size(1))
-
-        target_property = data.y[:, 4:5]  # HOMO-LUMO gap, keep dimension as [batch_size, 1]
+        # Property prediction loss - this is for the encoder's prediction ability
+        target_property = data.y[:, 4:5]  # HOMO-LUMO gap
         prop_loss = F.mse_loss(property_pred, target_property, reduction='mean')
 
         # normalize each term more consistently
-        recon_loss = recon_loss / (total_nodes + 1e-8)  # Avoid division by zero
         kl_loss = kl_loss / batch_size
         prop_loss = prop_loss  # Already normalized by mean
 
         # Combine losses with scaling factors
         # Use smaller coefficients to prevent overflow
-        total_loss = recon_weight * recon_loss + kl_weight * kl_loss + 0.1 * property_weight * prop_loss
+        total_loss = recon_weight * recon_loss + kl_weight * kl_loss + property_weight * prop_loss
 
         # Add guard against NaN or Inf
         if not torch.isfinite(total_loss):
