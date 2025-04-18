@@ -23,7 +23,25 @@ class PropertyConditionedVAE(Module):
         return mu
 
     def forward(self, data, target_property=None):
+        """
+        Forward pass through the VAE.
+
+        Args:
+            data: PyG Data batch
+            target_property: Optional target property (used during generation)
+
+        Returns:
+            node_features, positions, mu, log_var, property_pred, num_nodes
+        """
         logger = logging.getLogger('PropertyConditionedVAE')
+
+        # Safely log input information
+        batch_size = data.batch.max().item() + 1
+        logger.debug(f"Input data - batch_size: {batch_size}, nodes: {data.x.shape[0]}")
+        if target_property is not None:
+            logger.debug(f"Forward called with target_property shape: {target_property.shape}")
+        else:
+            logger.debug("Forward called without target_property (None)")
 
         # Encode
         mu, log_var, property_pred = self.encoder(data)
@@ -34,30 +52,26 @@ class PropertyConditionedVAE(Module):
         logger.debug(f"Sampled z shape: {z.shape}")
 
         # For conditioning the decoder:
-        # During training: use ground truth property (teacher forcing)
-        # During generation: use provided target property
         if self.training and target_property is None:
             # Use true property from data (teacher forcing)
             decoder_property = data.y[:, 4:5]  # HOMO-LUMO gap
+            logger.debug(f"Using teacher forcing with property shape: {decoder_property.shape}")
         elif target_property is not None:
             # Use provided target property (for generation or specific conditioning)
             decoder_property = target_property
             if decoder_property.size(1) != 1:
                 decoder_property = decoder_property[:, 4:5]
+            logger.debug(f"Using provided target property, shape after processing: {decoder_property.shape}")
         else:
             # During validation without teacher forcing, use encoder prediction
             decoder_property = property_pred
-        logger.debug(f"Target property shape before squeeze: {target_property.shape}")
+            logger.debug(f"Using encoder prediction for property, shape: {decoder_property.shape}")
 
-        # # Ensure target_property is 2D
-        # if len(target_property.shape) == 3:
-        #     target_property = target_property.squeeze(1)
-        # logger.debug(f"Target property shape after squeeze: {target_property.shape}")
-
-        # Decode
+        # IMPORTANT: Decode with decoder_property, NOT target_property
         node_features, positions, num_nodes = self.decoder(
-            z, decoder_property, data.batch.max().item() + 1
+            z, decoder_property, batch_size
         )
+
         logger.debug(f"Decoder outputs - features: {node_features.shape}, positions: {positions.shape}")
 
         return node_features, positions, mu, log_var, property_pred, num_nodes

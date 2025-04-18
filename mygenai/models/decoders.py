@@ -51,6 +51,7 @@ class ConditionalDecoder(Module):
         )
 
     def forward(self, z, target_property, batch_size):
+        """Forward pass through the decoder."""
         self.logger.debug(f"Input shapes - z: {z.shape}, target_property: {target_property.shape}")
 
         # Make sure target_property has correct shape for concatenation
@@ -59,6 +60,7 @@ class ConditionalDecoder(Module):
         if target_property.dim() == 1:
             target_property = target_property.unsqueeze(1)
 
+        # Concatenate latent vector with property condition
         z_cond = torch.cat([z, target_property], dim=1)
         h = self.lin_latent(z_cond)
 
