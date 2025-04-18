@@ -33,13 +33,20 @@ class PropertyConditionedVAE(Module):
         z = self.reparameterize(mu, log_var)
         logger.debug(f"Sampled z shape: {z.shape}")
 
-        # Use predicted property if target not provided
-        if target_property is None:
-            target_property = property_pred
+        # For conditioning the decoder:
+        # During training: use ground truth property (teacher forcing)
+        # During generation: use provided target property
+        if self.training and target_property is None:
+            # Use true property from data (teacher forcing)
+            decoder_property = data.y[:, 4:5]  # HOMO-LUMO gap
+        elif target_property is not None:
+            # Use provided target property (for generation or specific conditioning)
+            decoder_property = target_property
+            if decoder_property.size(1) != 1:
+                decoder_property = decoder_property[:, 4:5]
         else:
-            # if all properties provided, extract just the HOMO-LUMO gap
-            if target_property.size(1) != 1:
-                target_property = target_property[:, 4:5]
+            # During validation without teacher forcing, use encoder prediction
+            decoder_property = property_pred
         logger.debug(f"Target property shape before squeeze: {target_property.shape}")
 
         # # Ensure target_property is 2D
@@ -56,7 +63,7 @@ class PropertyConditionedVAE(Module):
         return node_features, positions, mu, log_var, property_pred, num_nodes
 
     def loss_function(self, node_features, positions, num_nodes, data, mu, log_var,
-                    property_pred, property_weight=1.0):
+                    property_pred, property_weight=1.0, recon_weight=1.0, kl_weight=0.1):
         logger = logging.getLogger(self.__class__.__name__)
 
         # Log shapes for debugging
@@ -113,9 +120,14 @@ class PropertyConditionedVAE(Module):
         target_property = data.y[:, 4:5]  # HOMO-LUMO gap, keep dimension as [batch_size, 1]
         prop_loss = F.mse_loss(property_pred, target_property, reduction='mean')
 
+        # normalize each term more consistently
+        recon_loss = recon_loss / (total_nodes + 1e-8)  # Avoid division by zero
+        kl_loss = kl_loss / batch_size
+        prop_loss = prop_loss  # Already normalized by mean
+
         # Combine losses with scaling factors
         # Use smaller coefficients to prevent overflow
-        total_loss = recon_loss + 0.01 * kl_loss + 0.1 * property_weight * prop_loss
+        total_loss = recon_weight * recon_loss + kl_weight * kl_loss + 0.1 * property_weight * prop_loss
 
         # Add guard against NaN or Inf
         if not torch.isfinite(total_loss):
@@ -123,9 +135,8 @@ class PropertyConditionedVAE(Module):
             # Return a backup loss that won't break training
             return torch.tensor(1000.0, device=total_loss.device, requires_grad=True)
 
-        # Log component values for debugging
-        if logger.isEnabledFor(logging.DEBUG):
-            logger.debug(f"Losses - recon: {recon_loss.item():.4f}, KL: {kl_loss.item():.4f}, prop: {prop_loss.item():.4f}, total: {total_loss.item():.4f}")
+        # log component values
+        logger.debug(f"Losses - recon: {recon_loss.item():.4f}, KL: {kl_loss.item():.4f}, prop: {prop_loss.item():.4f}, total: {total_loss.item():.4f}")
 
         return total_loss
 
