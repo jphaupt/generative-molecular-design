@@ -139,7 +139,7 @@ class PropertyConditionedVAE(Module):
 
         # Weight the position loss differently than feature loss
         # since positions have different scale than node features
-        recon_loss = feature_loss + 0.1 * position_loss
+        recon_loss = feature_loss + position_loss
 
         # KL divergence (already normalized by batch size)
         kl_loss = -0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp()) / batch_size
