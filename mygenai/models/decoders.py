@@ -1,124 +1,153 @@
 import logging
 import torch
-from torch.nn import Linear, ReLU, BatchNorm1d, Module, Sequential, Sigmoid, Dropout
-
-# !!!!
-# TODO !!!
-# !!!!
-# this model directly generates absolute atomic positions, which destroys equivariance!!!
-# this also has no reference frame
-# not sure why I thought this was a great idea at the time...
-# I will want to keep edge features to improve physical validity
+from torch.nn import Linear, ReLU, BatchNorm1d, Module, Sequential, Sigmoid
 
 class ConditionalDecoder(Module):
     def __init__(self, latent_dim=32, emb_dim=64, out_node_dim=11, out_edge_dim=4):
+        """
+        Initialize the decoder model for generative molecular design.
+
+        Parameters
+        ----------
+        latent_dim : int
+            Dimensionality of the latent space. Defaults to 32.
+        emb_dim : int
+            Dimensionality of the embedding space. Defaults to 64.
+        out_node_dim : int
+            Dimensionality of the node feature output (e.g., atom types). Defaults to 11.
+        out_edge_dim : int
+            Dimensionality of the edge feature output (e.g., bond types). Defaults to 4.
+
+        Attributes
+        ----------
+        lin_latent : torch.nn.Linear
+            Linear layer for projecting the latent space and property input to the embedding space.
+        node_decoder : torch.nn.Sequential
+            Sequential model for generating node features (e.g., atom types) from embeddings.
+        distance_decoder : torch.nn.Sequential
+            Sequential model for predicting scalar bond lengths (distances) between nodes.
+        distance_scale : torch.nn.Parameter
+            Parameter to scale predicted distances to a physical range (~1-3 Å).
+        direction_decoder : torch.nn.Sequential
+            Sequential model for predicting direction vectors (unit vectors) for relative orientation of connected atoms.
+        edge_features : torch.nn.Sequential
+            Sequential model for predicting edge properties (e.g., bond types) to ensure physicality.
+
+        Notes
+        -----
+        - The model uses a complete graph representation, which assumes all nodes are connected. This simplifies the model
+          and is suitable for small molecules, where the higher computational cost is not a significant issue.
+        - Edge existence is not explicitly predicted, as the complete graph assumption is used.
+        - Outputs are bounded to [0, 1] using sigmoid activations where appropriate.
+        - Since I kept getting bugs with this class, I have added extensive commenting to explain each step (with help
+          from LLMs).
+        """
         super().__init__()
         self.logger = logging.getLogger(self.__class__.__name__)
 
-        # in: initial latent vector + property
-        # generates:
-        # - node features (i.e. atoms)
-        # - distances (scalar bond lengths for two nodes/atoms)
-        # - direction vectors (defining relative orientation of connected atoms)
-        # - edge features (i.e. bond types, to ensure physicality)
-        # NOTE: at least for now, I am using complete graphs, as I found them to
-        #   perform better and the molecules we consider are small so the higher
-        #   scaling is not a serious problem. It is also a simpler model, and
-        #   this is only a proof of concep. Ipso facto, I do not need to predict
-        #   edge existence
-
         # Initial projection from latent+property space
-        # expect one property
+        # Input: (batch_size, latent_dim + 1) -> Output: (batch_size, emb_dim)
         self.lin_latent = Linear(latent_dim + 1, emb_dim)
 
         # Node feature generation
+        # Input: (n, emb_dim) -> Output: (n, out_node_dim)
         self.node_decoder = Sequential(
             Linear(emb_dim, emb_dim),
             ReLU(),
             BatchNorm1d(emb_dim),
             Linear(emb_dim, out_node_dim),
-            # Add tanh to bound outputs between -1 and 1
-            # TODO ? should I remove tanh?
-            # torch.nn.Tanh()
+            Sigmoid()  # Bound outputs to [0, 1]
         )
 
-        # Position generation
-        self.pos_decoder = Sequential(
-            Linear(emb_dim, emb_dim),
-            ReLU(),
-            BatchNorm1d(emb_dim),
-            Linear(emb_dim, 3),
-            # torch.nn.Tanh()
-        )
-
-        # Add scaling parameters to match data range
-        self.node_scale = torch.nn.Parameter(torch.tensor(4.5))  # Approximately half of max(9.0)
-        self.node_shift = torch.nn.Parameter(torch.tensor(4.5))  # Center between 0-9
-        self.pos_scale = torch.nn.Parameter(torch.tensor(5.0))   # Approx max position range
-        self.pos_shift = torch.nn.Parameter(torch.tensor(0.0))   # Center at 0 for positions
-
-        # Number of nodes predictor
-        self.num_nodes_predictor = Sequential(
-            Linear(emb_dim, emb_dim),
-            ReLU(),
-            Linear(emb_dim, 1)
-        )
-
-        # Edge prediction
-        self.edge_existence = Sequential(
+        # Distance prediction (scalar bond lengths)
+        # Input: (e, 2 * emb_dim) -> Output: (e, 1)
+        self.distance_decoder = Sequential(
             Linear(2 * emb_dim, emb_dim),
             ReLU(),
             BatchNorm1d(emb_dim),
             Linear(emb_dim, 1),
-            Sigmoid()
+            ReLU()  # Allow distances to be unbounded but non-negative
+        )
+        self.distance_scale = torch.nn.Parameter(torch.tensor(3.0))  # Scale to ~1-3 Å
+
+        # Direction vector prediction (unit vectors)
+        # Input: (e, 2 * emb_dim) -> Output: (e, 3)
+        self.direction_decoder = Sequential(
+            Linear(2 * emb_dim, emb_dim),
+            ReLU(),
+            BatchNorm1d(emb_dim),
+            Linear(emb_dim, 3)
         )
 
+        # Edge property prediction (e.g., bond type)
+        # Input: (e, 2 * emb_dim) -> Output: (e, out_edge_dim)
         self.edge_features = Sequential(
             Linear(2 * emb_dim, emb_dim),
             ReLU(),
             BatchNorm1d(emb_dim),
-            Linear(emb_dim, out_edge_dim)
+            Linear(emb_dim, out_edge_dim),
+            Sigmoid()  # Bound edge properties to [0, 1]
         )
 
-    def forward(self, z, target_property, batch_size):
-        """Forward pass through the decoder."""
+    def forward(self, z, target_property, data):
+        """
+        Forward pass through the decoder.
+
+        Args:
+            z: Latent space embedding (batch_size, latent_dim)
+            target_property: Target property (batch_size, 1)
+            data: Input graph data with precomputed complete graph (PyG Data object)
+
+        Returns:
+            node_features: Predicted node features (n, out_node_dim)
+            distances: Predicted distances for edges (e, 1)
+            directions: Predicted direction vectors for edges (e, 3)
+            edge_features: Predicted edge properties (e, out_edge_dim)
+        """
         self.logger.debug(f"Input shapes - z: {z.shape}, target_property: {target_property.shape}")
 
-        # Make sure target_property has correct shape for concatenation
-        if target_property.dim() == 3:
-            target_property = target_property.squeeze(1)
-        if target_property.dim() == 1:
-            target_property = target_property.unsqueeze(1)
-
         # Concatenate latent vector with property condition
+        # Input: z (batch_size, latent_dim), target_property (batch_size, 1)
+        # Output: z_cond (batch_size, latent_dim + 1)
         z_cond = torch.cat([z, target_property], dim=1)
+
+        # Project latent space to embedding space
+        # Input: z_cond (batch_size, latent_dim + 1)
+        # Output: h (batch_size, emb_dim)
         h = self.lin_latent(z_cond)
 
-        # Predict number of nodes per graph
-        num_nodes = self.num_nodes_predictor(h).sigmoid() * 30 + 5  # 5-35 nodes
-        num_nodes = num_nodes.long()
+        # Expand latent representation for all nodes in the graph
+        # Input: h (batch_size, emb_dim), data.batch (n,)
+        # Output: h_expanded (n, emb_dim)
+        h_expanded = h[data.batch]
 
-        node_features_list = []
-        positions_list = []
+        # Predict node features
+        # Input: h_expanded (n, emb_dim)
+        # Output: node_features (n, out_node_dim)
+        node_features = self.node_decoder(h_expanded)
 
-        for i in range(batch_size):
-            n = num_nodes[i].item()  # Convert tensor to integer
-            h_expanded = h[i:i+1].expand(n, -1)
+        # Combine node embeddings for edge prediction
+        # Input: h_expanded (n, emb_dim), data.edge_index (2, e)
+        # Output: edge_inputs (e, 2 * emb_dim)
+        src, dst = data.edge_index  # Precomputed complete graph
+        edge_inputs = torch.cat([h_expanded[src], h_expanded[dst]], dim=1)
 
-            # Generate node features and positions
-            node_feat = self.node_decoder(h_expanded)  # bounded to [-1, 1] by tanh
-            pos = self.pos_decoder(h_expanded)         # bounded to [-1, 1] by tanh
+        # Predict distances
+        # Input: edge_inputs (e, 2 * emb_dim)
+        # Output: distances (e, 1)
+        distances = self.distance_decoder(edge_inputs)
 
-            # Scale to match original data ranges
-            node_feat = node_feat * self.node_scale + self.node_shift  # Scale to [0, 9] range
-            pos = pos * self.pos_scale + self.pos_shift                # Scale with both parameters
+        # Predict direction vectors
+        # Input: edge_inputs (e, 2 * emb_dim)
+        # Output: directions (e, 3)
+        directions = self.direction_decoder(edge_inputs)
+        directions = directions / (torch.norm(directions, dim=1, keepdim=True) + 1e-10)  # Normalize to unit vectors
 
-            node_features_list.append(node_feat)
-            positions_list.append(pos)
+        # predict edge properties
+        # Input: edge_inputs (e, 2 * emb_dim)
+        # Output: edge_features (e, out_edge_dim)
+        edge_features = self.edge_features(edge_inputs)
 
-        node_features = torch.cat(node_features_list, dim=0)
-        positions = torch.cat(positions_list, dim=0)
+        self.logger.debug(f"Output shapes - node_features: {node_features.shape}, distances: {distances.shape}, directions: {directions.shape}, edge_features: {edge_features.shape}")
 
-        self.logger.debug(f"Output shapes - node_features: {node_features.shape}, positions: {positions.shape}")
-
-        return node_features, positions, num_nodes
+        return node_features, distances, directions, edge_features

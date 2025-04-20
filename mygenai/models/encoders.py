@@ -43,10 +43,12 @@ class Encoder(Module):
     def forward(self, data):
         """
         Args:
-            data: (PyG.Data) - batch of PyG graphs
+            data: (PyG.Data) - batch of PyG (complete) graphs
 
         Returns:
-            out: [(batch_size, d),(batch_size,3)] - updated node features
+            mu: Latent mean (batch_size, latent_dim)
+            log_var: Latent log variance (batch_size, latent_dim)
+            property_pred: Predicted property (batch_size, 1)
         """
         h = self.lin_in(data.x) # (n, d_n) -> (n, d)
         pos = data.pos
