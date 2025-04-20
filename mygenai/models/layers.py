@@ -13,7 +13,7 @@ class EquivariantMPNNLayer(MessagePassing):
         Args:
             emb_dim: (int) - hidden dimension `d`
             edge_dim: (int) - edge feature dimension `d_e`
-            aggr: (str) - aggregation function `\oplus` (sum/mean/max)
+            aggr: (str) - aggregation function `\\oplus` (sum/mean/max)
         """
         # Set the aggregation function
         super().__init__(aggr=aggr)

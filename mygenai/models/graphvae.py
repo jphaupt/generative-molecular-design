@@ -31,7 +31,7 @@ class PropertyConditionedVAE(Module):
             target_property: Optional target property (used during generation)
 
         Returns:
-            node_features, positions, mu, log_var, property_pred, num_nodes
+            node_features, distances, directions, edge_features, mu, log_var, property_pred
         """
         logger = logging.getLogger('PropertyConditionedVAE')
 
@@ -67,14 +67,20 @@ class PropertyConditionedVAE(Module):
             decoder_property = property_pred
             logger.debug(f"Using encoder prediction for property, shape: {decoder_property.shape}")
 
-        # IMPORTANT: Decode with decoder_property, NOT target_property
-        node_features, positions, num_nodes = self.decoder(
-            z, decoder_property, batch_size
+        # Decode
+        node_features, distances, directions, edge_features = self.decoder(
+            z, decoder_property, data
         )
 
-        logger.debug(f"Decoder outputs - features: {node_features.shape}, positions: {positions.shape}")
+        logger.debug(
+            f"Decoder outputs - "
+            f"node_features: {node_features.shape}, "
+            f"distances: {distances.shape}, "
+            f"directions: {directions.shape}, "
+            f"edge_features: {edge_features.shape}"
+        )
 
-        return node_features, positions, mu, log_var, property_pred, num_nodes
+        return node_features, distances, directions, edge_features, mu, log_var, property_pred
 
     def loss_function(self, node_features, positions, num_nodes, data, mu, log_var,
                     property_pred, property_weight=1.0, recon_weight=1.0, kl_weight=0.1):

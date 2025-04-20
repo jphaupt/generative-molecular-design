@@ -21,10 +21,10 @@ def qm9_dataset():
     # Only use first 100 examples to make tests faster
     dataset = dataset[:100]
 
-    # Normalize targets to mean = 0 and std = 1
-    mean = dataset.data.y.mean(dim=0, keepdim=True)
-    std = dataset.data.y.std(dim=0, keepdim=True)
-    dataset.data.y = (dataset.data.y - mean) / std
+    # Normalize targets to mean = 0 and std = 1 for the subset only
+    mean = dataset.y.mean(dim=0, keepdim=True)  # Access the subset's y attribute
+    std = dataset.y.std(dim=0, keepdim=True)
+    dataset.y = (dataset.y - mean) / std
 
     return dataset
 
