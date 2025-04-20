@@ -8,11 +8,24 @@ from torch.nn import Linear, ReLU, BatchNorm1d, Module, Sequential, Sigmoid, Dro
 # this model directly generates absolute atomic positions, which destroys equivariance!!!
 # this also has no reference frame
 # not sure why I thought this was a great idea at the time...
+# I will want to keep edge features to improve physical validity
 
 class ConditionalDecoder(Module):
     def __init__(self, latent_dim=32, emb_dim=64, out_node_dim=11, out_edge_dim=4):
         super().__init__()
         self.logger = logging.getLogger(self.__class__.__name__)
+
+        # in: initial latent vector + property
+        # generates:
+        # - node features (i.e. atoms)
+        # - distances (scalar bond lengths for two nodes/atoms)
+        # - direction vectors (defining relative orientation of connected atoms)
+        # - edge features (i.e. bond types, to ensure physicality)
+        # NOTE: at least for now, I am using complete graphs, as I found them to
+        #   perform better and the molecules we consider are small so the higher
+        #   scaling is not a serious problem. It is also a simpler model, and
+        #   this is only a proof of concep. Ipso facto, I do not need to predict
+        #   edge existence
 
         # Initial projection from latent+property space
         # expect one property
