@@ -14,7 +14,7 @@ def test_rot_trans_invariance(single_batch, random_orthogonal_matrix, device):
     # First forward pass
     with torch.no_grad():
         outputs1 = model(batch)
-        node_features1, distances1, directions1, edge_features1, mu1, log_var1, property_pred1 = outputs1
+        node_features1, distances1, directions1, edge_features1, num_nodes1, mu1, log_var1, property_pred1 = outputs1
 
     # Apply rotation and translation
     Q = random_orthogonal_matrix.to(device)
@@ -25,7 +25,7 @@ def test_rot_trans_invariance(single_batch, random_orthogonal_matrix, device):
     # Second forward pass
     with torch.no_grad():
         outputs2 = model(batch_rotated)
-        node_features2, distances2, directions2, edge_features2, mu2, log_var2, property_pred2 = outputs2
+        node_features2, distances2, directions2, edge_features2, num_nodes2, mu2, log_var2, property_pred2 = outputs2
 
     # Check that latent representations and property predictions are invariant
     assert torch.allclose(mu1, mu2, atol=1e-4), "Latent means are not invariant to rotation/translation."

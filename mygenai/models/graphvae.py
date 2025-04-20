@@ -7,7 +7,36 @@ from mygenai.models.encoders import Encoder
 from mygenai.models.decoders import ConditionalDecoder
 
 class PropertyConditionedVAE(Module):
+    """
+    Variational Autoencoder (VAE) for property-conditioned molecular generation.
+
+    Attributes
+    ----------
+    encoder : Encoder
+        The encoder module for encoding input graphs into latent space.
+    decoder : ConditionalDecoder
+        The decoder module for generating molecular graphs from latent space.
+    latent_dim : int
+        Dimensionality of the latent space.
+    """
+
     def __init__(self, num_layers=4, emb_dim=64, in_dim=11, edge_dim=4, latent_dim=32):
+        """
+        Initialize the PropertyConditionedVAE.
+
+        Parameters
+        ----------
+        num_layers : int, optional
+            Number of layers in the encoder and decoder, by default 4.
+        emb_dim : int, optional
+            Dimensionality of the embedding space, by default 64.
+        in_dim : int, optional
+            Dimensionality of the input node features, by default 11.
+        edge_dim : int, optional
+            Dimensionality of the input edge features, by default 4.
+        latent_dim : int, optional
+            Dimensionality of the latent space, by default 32.
+        """
         super().__init__()
         self.logger = logging.getLogger(self.__class__.__name__)
 
@@ -16,6 +45,21 @@ class PropertyConditionedVAE(Module):
         self.latent_dim = latent_dim
 
     def reparameterize(self, mu, log_var):
+        """
+        Perform the reparameterization trick to sample from the latent space.
+
+        Parameters
+        ----------
+        mu : torch.Tensor
+            Mean of the latent space distribution.
+        log_var : torch.Tensor
+            Log variance of the latent space distribution.
+
+        Returns
+        -------
+        torch.Tensor
+            Sampled latent vector.
+        """
         if self.training:
             std = torch.exp(0.5 * log_var)
             eps = torch.randn_like(std)
@@ -26,12 +70,25 @@ class PropertyConditionedVAE(Module):
         """
         Forward pass through the VAE.
 
-        Args:
-            data: PyG Data batch
-            target_property: Optional target property (used during generation)
+        Parameters
+        ----------
+        data : torch_geometric.data.Data
+            Input graph data batch.
+        target_property : torch.Tensor, optional
+            Target property for conditioning, by default None.
 
-        Returns:
-            node_features, distances, directions, edge_features, mu, log_var, property_pred
+        Returns
+        -------
+        tuple
+            Tuple containing:
+            - node_features (torch.Tensor): Predicted node features.
+            - distances (torch.Tensor): Predicted distances for edges.
+            - directions (torch.Tensor): Predicted direction vectors for edges.
+            - edge_features (torch.Tensor): Predicted edge properties.
+            - num_nodes (torch.Tensor): Predicted number of nodes.
+            - mu (torch.Tensor): Latent mean.
+            - log_var (torch.Tensor): Latent log variance.
+            - property_pred (torch.Tensor): Predicted property.
         """
         logger = logging.getLogger('PropertyConditionedVAE')
 
@@ -51,7 +108,7 @@ class PropertyConditionedVAE(Module):
         z = self.reparameterize(mu, log_var)
         logger.debug(f"Sampled z shape: {z.shape}")
 
-        # For conditioning the decoder:
+        # Determine decoder property
         if self.training and target_property is None:
             # Use true property from data (teacher forcing)
             decoder_property = data.y[:, 4:5]  # HOMO-LUMO gap
@@ -68,7 +125,7 @@ class PropertyConditionedVAE(Module):
             logger.debug(f"Using encoder prediction for property, shape: {decoder_property.shape}")
 
         # Decode
-        node_features, distances, directions, edge_features = self.decoder(
+        node_features, distances, directions, edge_features, num_nodes = self.decoder(
             z, decoder_property, data
         )
 
@@ -77,103 +134,91 @@ class PropertyConditionedVAE(Module):
             f"node_features: {node_features.shape}, "
             f"distances: {distances.shape}, "
             f"directions: {directions.shape}, "
-            f"edge_features: {edge_features.shape}"
+            f"edge_features: {edge_features.shape}, "
+            f"num_nodes: {num_nodes}"
         )
 
-        return node_features, distances, directions, edge_features, mu, log_var, property_pred
+        return node_features, distances, directions, edge_features, num_nodes, mu, log_var, property_pred
 
-    def loss_function(self, node_features, positions, num_nodes, data, mu, log_var,
-                    property_pred, property_weight=1.0, recon_weight=1.0, kl_weight=0.1):
+    def loss_function(self, node_features, distances, directions, edge_features, num_nodes, data, mu, log_var,
+                      property_pred, property_weight=1.0, recon_weight=1.0, kl_weight=0.1):
+        """
+        Compute the VAE loss.
+
+        Parameters
+        ----------
+        node_features : torch.Tensor
+            Predicted node features.
+        distances : torch.Tensor
+            Predicted distances for edges.
+        directions : torch.Tensor
+            Predicted direction vectors for edges.
+        edge_features : torch.Tensor
+            Predicted edge properties.
+        num_nodes : torch.Tensor
+            Predicted number of nodes.
+        data : torch_geometric.data.Data
+            Ground truth graph data.
+        mu : torch.Tensor
+            Latent mean.
+        log_var : torch.Tensor
+            Latent log variance.
+        property_pred : torch.Tensor
+            Predicted property.
+        property_weight : float, optional
+            Weight for property prediction loss, by default 1.0.
+        recon_weight : float, optional
+            Weight for reconstruction loss, by default 1.0.
+        kl_weight : float, optional
+            Weight for KL divergence loss, by default 0.1.
+
+        Returns
+        -------
+        torch.Tensor
+            Total loss.
+        """
         logger = logging.getLogger(self.__class__.__name__)
 
-        # Check for value instability early
-        if torch.isnan(node_features).any() or torch.isnan(positions).any():
-            logger.error("NaN values detected in model outputs!")
-            return torch.tensor(1000.0, device=node_features.device, requires_grad=True)
+        # Node feature reconstruction loss
+        feature_loss = F.mse_loss(node_features, data.x)
 
-        # Check for extremely large values early
-        max_node_value = node_features.abs().max().item()
-        max_pos_value = positions.abs().max().item()
-        if max_node_value > 100 or max_pos_value > 100:
-            logger.error(f"Large values detected! Features: {max_node_value}, Positions: {max_pos_value}")
-            # Add debugging info to pinpoint the issue
-            logger.error(f"Node features range: {node_features.min().item()} to {node_features.max().item()}")
-            logger.error(f"Positions range: {positions.min().item()} to {positions.max().item()}")
-            return torch.tensor(1000.0, device=node_features.device, requires_grad=True)
+        # Distance reconstruction loss
+        distance_loss = F.mse_loss(distances, data.edge_attr[:, :1])
 
-        # Log shapes for debugging
-        logger.debug(f"Property prediction shape: {property_pred.shape}")
-        logger.debug(f"Target property shape: {data.y.shape}")
+        # Calculate ground truth directions from absolute positions
+        src, dst = data.edge_index
+        relative_directions = data.pos[dst] - data.pos[src]
+        ground_truth_directions = relative_directions / (torch.norm(relative_directions, dim=1, keepdim=True) + 1e-10)
+        predicted_directions = directions / (torch.norm(directions, dim=1, keepdim=True) + 1e-10)
 
-        # Get batch size
-        batch_size = data.batch.max().item() + 1
+        # Direction reconstruction loss
+        direction_loss = F.mse_loss(predicted_directions, ground_truth_directions)
 
-        # Reconstruction loss (with proper masking for variable size graphs)
-        recon_loss = 0
-        start_idx = 0
-        total_nodes = 0
+        # Edge feature reconstruction loss
+        edge_loss = F.mse_loss(edge_features, data.edge_attr[:, 4:])
 
-        # Node feature and position losses with consistent handling
-        feature_loss = 0.0
-        position_loss = 0.0
+        # Number of nodes loss
+        num_nodes_loss = F.mse_loss(num_nodes, torch.bincount(data.batch, minlength=data.batch.max().item() + 1).float())
 
-        for i, n in enumerate(num_nodes):
-            n_orig = (data.batch == i).sum()
-            n_gen = n.item()
-            nodes_to_compare = min(n_gen, n_orig)
-            total_nodes += nodes_to_compare
+        # Combine reconstruction losses
+        recon_loss = feature_loss + distance_loss + direction_loss + edge_loss + num_nodes_loss
 
-            if nodes_to_compare > 0:
-                # Split losses for better scaling
-                feature_loss += F.mse_loss(
-                    node_features[start_idx:start_idx + nodes_to_compare],
-                    data.x[data.batch == i][:nodes_to_compare],
-                    reduction='mean'  # Use mean within each graph
-                )
+        # KL divergence loss
+        kl_loss = -0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp()) / data.batch.max().item()
 
-                position_loss += F.mse_loss(
-                    positions[start_idx:start_idx + nodes_to_compare],
-                    data.pos[data.batch == i][:nodes_to_compare],
-                    reduction='mean'  # Use mean within each graph
-                )
+        # Property prediction loss
+        target_property = data.y[:, 4:5]
+        property_loss = F.mse_loss(property_pred, target_property)
 
-            start_idx += n_gen
-
-        # Normalize by number of graphs (not total nodes)
-        feature_loss = feature_loss / batch_size
-        position_loss = position_loss / batch_size
-
-        # Weight the position loss differently than feature loss
-        # since positions have different scale than node features
-        recon_loss = feature_loss + position_loss
-
-        # KL divergence (already normalized by batch size)
-        kl_loss = -0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp()) / batch_size
-
-        # Property prediction loss - this is for the encoder's prediction ability
-        target_property = data.y[:, 4:5]  # HOMO-LUMO gap
-        prop_loss = F.mse_loss(property_pred, target_property, reduction='mean')
-
-        # normalize each term more consistently
-        kl_loss = kl_loss / batch_size
-        prop_loss = prop_loss  # Already normalized by mean
-
-        # Combine losses with scaling factors
-        # Use smaller coefficients to prevent overflow
-        total_loss = recon_weight * recon_loss + kl_weight * kl_loss + property_weight * prop_loss
-
-        # Add guard against NaN or Inf
-        if not torch.isfinite(total_loss):
-            logger.error(f"Non-finite loss detected! recon={recon_loss}, kl={kl_loss}, prop={prop_loss}")
-            # Return a backup loss that won't break training
-            return torch.tensor(1000.0, device=total_loss.device, requires_grad=True)
-
-        # log component values
-        logger.debug(f"Losses - recon: {recon_loss.item():.4f}, KL: {kl_loss.item():.4f}, prop: {prop_loss.item():.4f}, total: {total_loss.item():.4f}")
+        # Total loss
+        total_loss = (recon_weight * recon_loss +
+                      kl_weight * kl_loss +
+                      property_weight * property_loss)
 
         return total_loss
 
     def generate_molecule(self, target_property, num_samples=1):
+        """TODO"""
         self.eval()
         with torch.no_grad():
             # Sample from prior

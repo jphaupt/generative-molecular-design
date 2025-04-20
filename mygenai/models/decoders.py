@@ -26,12 +26,12 @@ class ConditionalDecoder(Module):
             Sequential model for generating node features (e.g., atom types) from embeddings.
         distance_decoder : torch.nn.Sequential
             Sequential model for predicting scalar bond lengths (distances) between nodes.
-        distance_scale : torch.nn.Parameter
-            Parameter to scale predicted distances to a physical range (~1-3 Å).
         direction_decoder : torch.nn.Sequential
             Sequential model for predicting direction vectors (unit vectors) for relative orientation of connected atoms.
         edge_features : torch.nn.Sequential
             Sequential model for predicting edge properties (e.g., bond types) to ensure physicality.
+        num_nodes_predictor : torch.nn.Sequential
+            Sequential model for predicting the number of nodes in the graph.
 
         Notes
         -----
@@ -68,7 +68,6 @@ class ConditionalDecoder(Module):
             Linear(emb_dim, 1),
             ReLU()  # Allow distances to be unbounded but non-negative
         )
-        self.distance_scale = torch.nn.Parameter(torch.tensor(3.0))  # Scale to ~1-3 Å
 
         # Direction vector prediction (unit vectors)
         # Input: (e, 2 * emb_dim) -> Output: (e, 3)
@@ -89,6 +88,16 @@ class ConditionalDecoder(Module):
             Sigmoid()  # Bound edge properties to [0, 1]
         )
 
+        # Number of nodes prediction
+        # Input: (batch_size, emb_dim) -> Output: (batch_size, 1)
+        self.num_nodes_predictor = Sequential(
+            Linear(emb_dim, emb_dim),
+            ReLU(),
+            BatchNorm1d(emb_dim),
+            Linear(emb_dim, 1),
+            ReLU()  # Predicts a positive scalar
+        )
+
     def forward(self, z, target_property, data):
         """
         Forward pass through the decoder.
@@ -103,6 +112,7 @@ class ConditionalDecoder(Module):
             distances: Predicted distances for edges (e, 1)
             directions: Predicted direction vectors for edges (e, 3)
             edge_features: Predicted edge properties (e, out_edge_dim)
+            num_nodes: Predicted number of nodes in the graph (batch_size,)
         """
         self.logger.debug(f"Input shapes - z: {z.shape}, target_property: {target_property.shape}")
 
@@ -148,6 +158,11 @@ class ConditionalDecoder(Module):
         # Output: edge_features (e, out_edge_dim)
         edge_features = self.edge_features(edge_inputs)
 
-        self.logger.debug(f"Output shapes - node_features: {node_features.shape}, distances: {distances.shape}, directions: {directions.shape}, edge_features: {edge_features.shape}")
+        # Predict number of nodes
+        # Input: h (batch_size, emb_dim)
+        # Output: num_nodes (batch_size,)
+        num_nodes = self.num_nodes_predictor(h).squeeze(-1)
 
-        return node_features, distances, directions, edge_features
+        self.logger.debug(f"Output shapes - node_features: {node_features.shape}, distances: {distances.shape}, directions: {directions.shape}, edge_features: {edge_features.shape}, num_nodes: {num_nodes.shape}")
+
+        return node_features, distances, directions, edge_features, num_nodes
