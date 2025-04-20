@@ -5,36 +5,35 @@ from torch_geometric.nn import MessagePassing
 from torch_scatter import scatter
 
 class EquivariantMPNNLayer(MessagePassing):
-    def __init__(self, emb_dim=64, edge_dim=4, aggr='add'):
-        """Message Passing Neural Network Layer
-
-        This layer is equivariant to 3D rotations and translations.
+    def __init__(self, emb_dim=64, edge_dim=4, aggr='add', max_distance=2.0):
+        """
+        Message Passing Neural Network Layer
 
         Args:
             emb_dim: (int) - hidden dimension `d`
             edge_dim: (int) - edge feature dimension `d_e`
             aggr: (str) - aggregation function `\\oplus` (sum/mean/max)
+            max_distance: (float) - fixed maximum distance for normalization
         """
-        # Set the aggregation function
         super().__init__(aggr=aggr)
-
         self.emb_dim = emb_dim
         self.edge_dim = edge_dim
+        self.max_distance = max_distance
 
         self.mlp_scalar = Sequential(
-            Linear(2*emb_dim + edge_dim + 1, emb_dim),  # +1 for distance
+            Linear(2 * emb_dim + edge_dim + 1, emb_dim),  # +1 for normalized distance
             BatchNorm1d(emb_dim),
             ReLU()
         )
         self.mlp_vector = Sequential(
-            Linear(2*emb_dim + edge_dim + 1, 1),  # Input: [h_i, h_j, edge_attr, dist]
+            Linear(2 * emb_dim + edge_dim + 1, 1),  # Input: [h_i, h_j, edge_attr, normalized dist]
             BatchNorm1d(1),
             ReLU()
         )
 
         # update MLPs
         self.mlp_h = Sequential(
-            Linear(2*emb_dim, emb_dim), BatchNorm1d(emb_dim), ReLU(),
+            Linear(2 * emb_dim, emb_dim), BatchNorm1d(emb_dim), ReLU(),
             Linear(emb_dim, emb_dim), BatchNorm1d(emb_dim), ReLU()
         )
         self.mlp_pos = Sequential(
@@ -58,8 +57,9 @@ class EquivariantMPNNLayer(MessagePassing):
         return self.propagate(edge_index, h=h, pos=pos, edge_attr=edge_attr)
 
     def message(self, h_i, h_j, pos_i, pos_j, edge_attr):
-        r_ij = pos_j - pos_i # equivariant
-        dist = torch.norm(r_ij, dim=-1, keepdim=True)  # invariant
+        r_ij = pos_j - pos_i  # Equivariant relative positions
+        dist = torch.norm(r_ij, dim=-1, keepdim=True)  # Invariant distances
+        dist = dist / self.max_distance  # Normalize distances by the fixed maximum distance
 
         # Scalar message (invariant features)
         scalar_inputs = torch.cat([h_i, h_j, edge_attr, dist], dim=-1)

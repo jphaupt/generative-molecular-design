@@ -20,7 +20,7 @@ class PropertyConditionedVAE(Module):
         Dimensionality of the latent space.
     """
 
-    def __init__(self, num_layers=4, emb_dim=64, in_dim=5, edge_dim=4, latent_dim=32):
+    def __init__(self, num_layers=4, emb_dim=64, in_dim=5, edge_dim=4, latent_dim=32, max_distance=2.0):
         """
         Initialize the PropertyConditionedVAE.
 
@@ -36,12 +36,14 @@ class PropertyConditionedVAE(Module):
             Dimensionality of the input edge features, by default 4.
         latent_dim : int, optional
             Dimensionality of the latent space, by default 32.
+        max_distance : float, optional
+            Fixed maximum distance for normalization, by default 2.0.
         """
         super().__init__()
         self.logger = logging.getLogger(self.__class__.__name__)
 
         self.encoder = Encoder(emb_dim, in_dim, edge_dim, latent_dim)
-        self.decoder = ConditionalDecoder(latent_dim, emb_dim, in_dim)
+        self.decoder = ConditionalDecoder(latent_dim, emb_dim, in_dim, max_distance=max_distance)
         self.latent_dim = latent_dim
 
     def reparameterize(self, mu, log_var):
@@ -189,18 +191,16 @@ class PropertyConditionedVAE(Module):
         # Ground truth distances
         ground_truth_distances = torch.norm(relative_directions, dim=1, keepdim=True)
 
+        # Normalize ground truth distances
+        normalized_ground_truth_distances = ground_truth_distances / self.decoder.max_distance
+
         # Ground truth directions (unit vectors)
         ground_truth_directions = relative_directions / (ground_truth_distances + 1e-10)
 
-        # Predicted directions (normalize to unit vectors) -- we assume they are already unit vectors!
-        # predicted_directions = directions / (torch.norm(directions, dim=1, keepdim=True) + 1e-10)
-
         # Distance reconstruction loss
-        distance_loss = F.mse_loss(distances, ground_truth_distances)
+        distance_loss = F.mse_loss(distances, normalized_ground_truth_distances) / self.decoder.max_distance
 
         # Direction reconstruction loss
-        # direction_loss = F.mse_loss(directions, ground_truth_directions)
-        # penalise angular misalignment
         direction_loss = 1 - F.cosine_similarity(directions, ground_truth_directions, dim=1).mean()
 
         # Edge feature reconstruction loss

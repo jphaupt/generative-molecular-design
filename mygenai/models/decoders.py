@@ -3,7 +3,7 @@ import torch
 from torch.nn import Linear, ReLU, BatchNorm1d, Module, Sequential, Sigmoid
 
 class ConditionalDecoder(Module):
-    def __init__(self, latent_dim=32, emb_dim=64, out_node_dim=5, out_edge_dim=4):
+    def __init__(self, latent_dim=32, emb_dim=64, out_node_dim=5, out_edge_dim=4, max_distance=2.0):
         """
         Initialize the decoder model for generative molecular design.
 
@@ -44,6 +44,7 @@ class ConditionalDecoder(Module):
         """
         super().__init__()
         self.logger = logging.getLogger(self.__class__.__name__)
+        self.max_distance = max_distance
 
         # Initial projection from latent+property space
         # Input: (batch_size, latent_dim + 1) -> Output: (batch_size, emb_dim)
@@ -66,7 +67,7 @@ class ConditionalDecoder(Module):
             ReLU(),
             BatchNorm1d(emb_dim),
             Linear(emb_dim, 1),
-            ReLU()  # Allow distances to be unbounded but non-negative
+            Sigmoid()
         )
 
         # Direction vector prediction (unit vectors)
@@ -146,6 +147,7 @@ class ConditionalDecoder(Module):
         # Input: edge_inputs (e, 2 * emb_dim)
         # Output: distances (e, 1)
         distances = self.distance_decoder(edge_inputs)
+        distances = distances * self.max_distance  # Scale distances to the original range
 
         # Predict direction vectors
         # Input: edge_inputs (e, 2 * emb_dim)
