@@ -5,7 +5,7 @@ from torch_geometric.nn import global_mean_pool
 from mygenai.models.layers import EquivariantMPNNLayer
 
 class Encoder(Module):
-    def __init__(self, emb_dim=64, in_dim=11, edge_dim=4, latent_dim=32):
+    def __init__(self, emb_dim=64, in_dim=5, edge_dim=4, latent_dim=32):
         """Encoder module for graph property prediction
 
         Args:

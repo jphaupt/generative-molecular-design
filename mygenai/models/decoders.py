@@ -3,7 +3,7 @@ import torch
 from torch.nn import Linear, ReLU, BatchNorm1d, Module, Sequential, Sigmoid
 
 class ConditionalDecoder(Module):
-    def __init__(self, latent_dim=32, emb_dim=64, out_node_dim=11, out_edge_dim=4):
+    def __init__(self, latent_dim=32, emb_dim=64, out_node_dim=5, out_edge_dim=4):
         """
         Initialize the decoder model for generative molecular design.
 
@@ -56,7 +56,7 @@ class ConditionalDecoder(Module):
             ReLU(),
             BatchNorm1d(emb_dim),
             Linear(emb_dim, out_node_dim),
-            Sigmoid()  # Bound outputs to [0, 1]
+            Sigmoid()  # Outputs in [0, 1] (assumes normalized node features!)
         )
 
         # Distance prediction (scalar bond lengths)

@@ -20,7 +20,7 @@ class PropertyConditionedVAE(Module):
         Dimensionality of the latent space.
     """
 
-    def __init__(self, num_layers=4, emb_dim=64, in_dim=11, edge_dim=4, latent_dim=32):
+    def __init__(self, num_layers=4, emb_dim=64, in_dim=5, edge_dim=4, latent_dim=32):
         """
         Initialize the PropertyConditionedVAE.
 
@@ -182,20 +182,29 @@ class PropertyConditionedVAE(Module):
         # Node feature reconstruction loss
         feature_loss = F.mse_loss(node_features, data.x)
 
-        # Distance reconstruction loss
-        distance_loss = F.mse_loss(distances, data.edge_attr[:, :1])
+        # Calculate ground truth distances and directions from absolute positions
+        src, dst = data.edge_index  # Source and destination nodes for each edge
+        relative_directions = data.pos[dst] - data.pos[src]  # Relative direction vectors
 
-        # Calculate ground truth directions from absolute positions
-        src, dst = data.edge_index
-        relative_directions = data.pos[dst] - data.pos[src]
-        ground_truth_directions = relative_directions / (torch.norm(relative_directions, dim=1, keepdim=True) + 1e-10)
-        predicted_directions = directions / (torch.norm(directions, dim=1, keepdim=True) + 1e-10)
+        # Ground truth distances
+        ground_truth_distances = torch.norm(relative_directions, dim=1, keepdim=True)
+
+        # Ground truth directions (unit vectors)
+        ground_truth_directions = relative_directions / (ground_truth_distances + 1e-10)
+
+        # Predicted directions (normalize to unit vectors) -- we assume they are already unit vectors!
+        # predicted_directions = directions / (torch.norm(directions, dim=1, keepdim=True) + 1e-10)
+
+        # Distance reconstruction loss
+        distance_loss = F.mse_loss(distances, ground_truth_distances)
 
         # Direction reconstruction loss
-        direction_loss = F.mse_loss(predicted_directions, ground_truth_directions)
+        # direction_loss = F.mse_loss(directions, ground_truth_directions)
+        # penalise angular misalignment
+        direction_loss = 1 - F.cosine_similarity(directions, ground_truth_directions, dim=1).mean()
 
         # Edge feature reconstruction loss
-        edge_loss = F.mse_loss(edge_features, data.edge_attr[:, 4:])
+        edge_loss = F.mse_loss(edge_features, data.edge_attr)
 
         # Number of nodes loss
         num_nodes_loss = F.mse_loss(num_nodes, torch.bincount(data.batch, minlength=data.batch.max().item() + 1).float())
@@ -206,7 +215,7 @@ class PropertyConditionedVAE(Module):
         # KL divergence loss
         kl_loss = -0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp()) / data.batch.max().item()
 
-        # Property prediction loss
+        # HOMO-LUMO Property prediction loss
         target_property = data.y[:, 4:5]
         property_loss = F.mse_loss(property_pred, target_property)
 
