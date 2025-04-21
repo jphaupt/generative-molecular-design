@@ -5,15 +5,19 @@ from torch_geometric.nn import global_mean_pool
 from mygenai.models.layers import EquivariantMPNNLayer
 
 class Encoder(Module):
-    def __init__(self, emb_dim=64, in_dim=5, edge_dim=4, latent_dim=32):
+    def __init__(self, emb_dim=64, in_dim=5, edge_dim=4, latent_dim=32, max_distance=2.0, min_distance=0.8):
         """Encoder module for graph property prediction
 
         Args:
             emb_dim: (int) - hidden dimension `d`
             in_dim: (int) - initial node feature dimension `d_n`
             edge_dim: (int) - edge feature dimension `d_e`
+            max_distance: (float) - maximum distance for edge filtering
+            min_distance: (float) - minimum distance for edge filtering
         """
         super().__init__()
+        self.max_distance = max_distance
+        self.min_distance = min_distance
 
         # Linear projection for initial node features
         # dim: d_n -> d
@@ -22,7 +26,7 @@ class Encoder(Module):
         # Stack of MPNN layers
         self.convs = torch.nn.ModuleList()
         for layer in range(2):
-            self.convs.append(EquivariantMPNNLayer(emb_dim, edge_dim, aggr='add'))
+            self.convs.append(EquivariantMPNNLayer(emb_dim, edge_dim, aggr='add', max_distance=max_distance, min_distance=min_distance))
 
         # Global pooling/readout function `R` (mean pooling)
         # PyG handles the underlying logic via `global_mean_pool()`

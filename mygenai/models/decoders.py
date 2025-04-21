@@ -1,9 +1,9 @@
 import logging
 import torch
-from torch.nn import Linear, ReLU, BatchNorm1d, Module, Sequential, Sigmoid
+from torch.nn import Linear, ReLU, BatchNorm1d, Module, Sequential, Sigmoid, Tanh, Softmax
 
 class ConditionalDecoder(Module):
-    def __init__(self, latent_dim=32, emb_dim=64, out_node_dim=5, out_edge_dim=4, max_distance=2.0):
+    def __init__(self, latent_dim=32, emb_dim=64, out_node_dim=5, out_edge_dim=4, max_distance=2.0, min_distance=0.8):
         """
         Initialize the decoder model for generative molecular design.
 
@@ -17,6 +17,10 @@ class ConditionalDecoder(Module):
             Dimensionality of the node feature output (e.g., atom types). Defaults to 11.
         out_edge_dim : int
             Dimensionality of the edge feature output (e.g., bond types). Defaults to 4.
+        max_distance : float, optional
+            Fixed maximum distance for normalization, by default 2.0.
+        min_distance : float, optional
+            Fixed minimum distance for normalization, by default 0.8.
 
         Attributes
         ----------
@@ -45,6 +49,7 @@ class ConditionalDecoder(Module):
         super().__init__()
         self.logger = logging.getLogger(self.__class__.__name__)
         self.max_distance = max_distance
+        self.min_distance = min_distance
 
         # Initial projection from latent+property space
         # Input: (batch_size, latent_dim + 1) -> Output: (batch_size, emb_dim)
@@ -57,7 +62,7 @@ class ConditionalDecoder(Module):
             ReLU(),
             BatchNorm1d(emb_dim),
             Linear(emb_dim, out_node_dim),
-            Sigmoid()  # Outputs in [0, 1] (assumes normalized node features!)
+            Softmax(dim=-1)  # One-hot encoding
         )
 
         # Distance prediction (scalar bond lengths)
@@ -67,7 +72,7 @@ class ConditionalDecoder(Module):
             ReLU(),
             BatchNorm1d(emb_dim),
             Linear(emb_dim, 1),
-            Sigmoid()
+            Sigmoid()  # Constrain output to [0, 1]
         )
 
         # Direction vector prediction (unit vectors)
@@ -86,7 +91,7 @@ class ConditionalDecoder(Module):
             ReLU(),
             BatchNorm1d(emb_dim),
             Linear(emb_dim, out_edge_dim),
-            Sigmoid()  # Bound edge properties to [0, 1]
+            Softmax(dim=-1)  # Predicts probabilities for each bond type
         )
 
         # Number of nodes prediction
@@ -147,7 +152,7 @@ class ConditionalDecoder(Module):
         # Input: edge_inputs (e, 2 * emb_dim)
         # Output: distances (e, 1)
         distances = self.distance_decoder(edge_inputs)
-        distances = distances * self.max_distance  # Scale distances to the original range
+        distances = distances * (self.max_distance - self.min_distance) + self.min_distance
 
         # Predict direction vectors
         # Input: edge_inputs (e, 2 * emb_dim)

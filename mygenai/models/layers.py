@@ -3,9 +3,9 @@ import torch.nn.functional as F
 from torch.nn import Linear, ReLU, BatchNorm1d, Module, Sequential
 from torch_geometric.nn import MessagePassing
 from torch_scatter import scatter
-
+# TODO decoder has changed for distance reconstruction so this probably needs to change too?
 class EquivariantMPNNLayer(MessagePassing):
-    def __init__(self, emb_dim=64, edge_dim=4, aggr='add', max_distance=2.0):
+    def __init__(self, emb_dim=64, edge_dim=4, aggr='add', max_distance=2.0, min_distance=0.8):
         """
         Message Passing Neural Network Layer
 
@@ -14,11 +14,13 @@ class EquivariantMPNNLayer(MessagePassing):
             edge_dim: (int) - edge feature dimension `d_e`
             aggr: (str) - aggregation function `\\oplus` (sum/mean/max)
             max_distance: (float) - fixed maximum distance for normalization
+            min_distance: (float) - fixed minimum distance for normalization
         """
         super().__init__(aggr=aggr)
         self.emb_dim = emb_dim
         self.edge_dim = edge_dim
         self.max_distance = max_distance
+        self.min_distance = min_distance
 
         self.mlp_scalar = Sequential(
             Linear(2 * emb_dim + edge_dim + 1, emb_dim),  # +1 for normalized distance
@@ -58,8 +60,8 @@ class EquivariantMPNNLayer(MessagePassing):
 
     def message(self, h_i, h_j, pos_i, pos_j, edge_attr):
         r_ij = pos_j - pos_i  # Equivariant relative positions
-        dist = torch.norm(r_ij, dim=-1, keepdim=True)  # Invariant distances
-        dist = dist / self.max_distance  # Normalize distances by the fixed maximum distance
+        dist = torch.norm(r_ij, dim=-1, keepdim=True)  # Compute raw distances
+        dist = (dist - self.min_distance) / (self.max_distance - self.min_distance)  # Normalize to [0, 1]
 
         # Scalar message (invariant features)
         scalar_inputs = torch.cat([h_i, h_j, edge_attr, dist], dim=-1)
