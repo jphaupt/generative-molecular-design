@@ -28,6 +28,8 @@ class ConditionalDecoder(Module):
             Linear layer for projecting the latent space and property input to the embedding space.
         node_decoder : torch.nn.Sequential
             Sequential model for generating node features (e.g., atom types) from embeddings.
+        edge_existence : torch.nn.Sequential
+            Sequential model for predicting edge existence.
         distance_decoder : torch.nn.Sequential
             Sequential model for predicting scalar bond lengths (distances) between nodes.
         direction_decoder : torch.nn.Sequential
@@ -41,7 +43,6 @@ class ConditionalDecoder(Module):
         -----
         - The model uses a complete graph representation, which assumes all nodes are connected. This simplifies the model
           and is suitable for small molecules, where the higher computational cost is not a significant issue.
-        - Edge existence is not explicitly predicted, as the complete graph assumption is used.
         - Outputs are bounded to [0, 1] using sigmoid activations where appropriate.
         - Since I kept getting bugs with this class, I have added extensive commenting to explain each step (with help
           from LLMs).
@@ -63,6 +64,16 @@ class ConditionalDecoder(Module):
             BatchNorm1d(emb_dim),
             Linear(emb_dim, out_node_dim),
             Softmax(dim=-1)  # One-hot encoding
+        )
+
+        # Edge existence prediction
+        # Input: (e, 2 * emb_dim) -> Output: (e, 1)
+        self.edge_existence = Sequential(
+            Linear(2 * emb_dim, emb_dim),
+            ReLU(),
+            BatchNorm1d(emb_dim),
+            Linear(emb_dim, 1),
+            Sigmoid()  # Output in [0, 1]
         )
 
         # Distance prediction (scalar bond lengths)
@@ -119,6 +130,7 @@ class ConditionalDecoder(Module):
             directions: Predicted direction vectors for edges (e, 3)
             edge_features: Predicted edge properties (e, out_edge_dim)
             num_nodes: Predicted number of nodes in the graph (batch_size,)
+            edge_existence: Predicted edge existence probabilities (e, 1)
         """
         self.logger.debug(f"Input shapes - z: {z.shape}, target_property: {target_property.shape}")
 
@@ -148,19 +160,24 @@ class ConditionalDecoder(Module):
         src, dst = data.edge_index  # Precomputed complete graph
         edge_inputs = torch.cat([h_expanded[src], h_expanded[dst]], dim=1)
 
-        # Predict distances
+        # Predict edge existence
+        # Input: edge_inputs (e, 2 * emb_dim)
+        # Output: edge_existence (e, 1)
+        edge_existence = self.edge_existence(edge_inputs)
+
+        # Predict distances for edges
         # Input: edge_inputs (e, 2 * emb_dim)
         # Output: distances (e, 1)
         distances = self.distance_decoder(edge_inputs)
         distances = distances * (self.max_distance - self.min_distance) + self.min_distance
 
-        # Predict direction vectors
+        # Predict direction vectors for edges
         # Input: edge_inputs (e, 2 * emb_dim)
         # Output: directions (e, 3)
         directions = self.direction_decoder(edge_inputs)
         directions = directions / (torch.norm(directions, dim=1, keepdim=True) + 1e-10)  # Normalize to unit vectors
 
-        # predict edge properties
+        # Predict bond types for edges
         # Input: edge_inputs (e, 2 * emb_dim)
         # Output: edge_features (e, out_edge_dim)
         edge_features = self.edge_features(edge_inputs)
@@ -170,6 +187,6 @@ class ConditionalDecoder(Module):
         # Output: num_nodes (batch_size,)
         num_nodes = self.num_nodes_predictor(h).squeeze(-1)
 
-        self.logger.debug(f"Output shapes - node_features: {node_features.shape}, distances: {distances.shape}, directions: {directions.shape}, edge_features: {edge_features.shape}, num_nodes: {num_nodes.shape}")
+        self.logger.debug(f"Output shapes - node_features: {node_features.shape}, distances: {distances.shape}, directions: {directions.shape}, edge_features: {edge_features.shape}, num_nodes: {num_nodes.shape}, edge_existence: {edge_existence.shape}")
 
-        return node_features, distances, directions, edge_features, num_nodes
+        return node_features, distances, directions, edge_features, num_nodes, edge_existence

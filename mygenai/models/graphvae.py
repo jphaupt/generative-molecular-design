@@ -90,6 +90,7 @@ class PropertyConditionedVAE(Module):
             - directions (torch.Tensor): Predicted direction vectors for edges.
             - edge_features (torch.Tensor): Predicted edge properties.
             - num_nodes (torch.Tensor): Predicted number of nodes.
+            - edge_existence (torch.Tensor): Predicted edge existence probabilities.
             - mu (torch.Tensor): Latent mean.
             - log_var (torch.Tensor): Latent log variance.
             - property_pred (torch.Tensor): Predicted property.
@@ -129,7 +130,7 @@ class PropertyConditionedVAE(Module):
             logger.debug(f"Using encoder prediction for property, shape: {decoder_property.shape}")
 
         # Decode
-        node_features, distances, directions, edge_features, num_nodes = self.decoder(
+        node_features, distances, directions, edge_features, num_nodes, edge_existence = self.decoder(
             z, decoder_property, data
         )
 
@@ -139,12 +140,13 @@ class PropertyConditionedVAE(Module):
             f"distances: {distances.shape}, "
             f"directions: {directions.shape}, "
             f"edge_features: {edge_features.shape}, "
-            f"num_nodes: {num_nodes}"
+            f"num_nodes: {num_nodes}, "
+            f"edge_existence: {edge_existence.shape}"
         )
 
-        return node_features, distances, directions, edge_features, num_nodes, mu, log_var, property_pred
+        return node_features, distances, directions, edge_features, num_nodes, edge_existence, mu, log_var, property_pred
 
-    def loss_function(self, node_features, distances, directions, edge_features, num_nodes, data, mu, log_var,
+    def loss_function(self, node_features, distances, directions, edge_features, num_nodes, edge_existence, data, mu, log_var,
                       property_pred, property_weight=1.0, recon_weight=1.0, kl_weight=0.1):
         """
         Compute the VAE loss with detailed logging for debugging.
@@ -161,6 +163,8 @@ class PropertyConditionedVAE(Module):
             Predicted edge properties.
         num_nodes : torch.Tensor
             Predicted number of nodes.
+        edge_existence : torch.Tensor
+            Predicted edge existence probabilities.
         data : torch_geometric.data.Data
             Ground truth graph data.
         mu : torch.Tensor
@@ -187,36 +191,27 @@ class PropertyConditionedVAE(Module):
         node_loss = F.cross_entropy(node_features, data.x.argmax(dim=-1))
         logger.debug(f"Node feature loss: {node_loss.item():.6f}")
 
-        # Calculate ground truth distances and directions from absolute positions
-        src, dst = data.edge_index
-        relative_directions = data.pos[dst] - data.pos[src]
-        ground_truth_distances = torch.norm(relative_directions, dim=1, keepdim=True)
+        # Edge existence loss
+        edge_existence_loss = F.binary_cross_entropy(edge_existence.squeeze(-1), data.edge_existence.float())
+        logger.debug(f"Edge existence loss: {edge_existence_loss.item():.6f}")
 
-        # Normalize predicted distances to [0, 1]
-        normalized_predicted_distances = (distances - self.decoder.min_distance) / (self.decoder.max_distance - self.decoder.min_distance)
-
-        # Normalize ground truth distances to [0, 1]
-        normalized_ground_truth_distances = (ground_truth_distances - self.decoder.min_distance) / (
-            self.decoder.max_distance - self.decoder.min_distance
-        )
+        # Filter edges that exist in the ground truth
+        existing_edges = data.edge_existence.bool()
 
         # Distance reconstruction loss
-        distance_loss = F.mse_loss(normalized_predicted_distances, normalized_ground_truth_distances)
-
-        # Ground truth directions (unit vectors)
-        ground_truth_directions = relative_directions / (ground_truth_distances + 1e-10)
-
-        # Regularize distances to penalize values outside [0, 1] (distances are already normalised)
-        distance_regularization = torch.mean((distances - self.decoder.max_distance).clamp(min=0) ** 2) + \
-                                  torch.mean((self.decoder.min_distance - distances).clamp(min=0) ** 2)
+        ground_truth_distances = torch.norm(data.pos[data.edge_index[1]] - data.pos[data.edge_index[0]], dim=1, keepdim=True)
+        distance_loss = F.mse_loss(
+            distances[existing_edges],
+            ground_truth_distances[existing_edges]
+        )
 
         # Direction reconstruction loss
-        direction_loss = 1 - F.cosine_similarity(directions, ground_truth_directions, dim=1).mean()
+        relative_directions = data.pos[data.edge_index[1]] - data.pos[data.edge_index[0]]
+        ground_truth_directions = relative_directions / (ground_truth_distances + 1e-10)
+        direction_loss = 1 - F.cosine_similarity(directions, ground_truth_directions[existing_edges], dim=1).mean()
 
-        # Convert edge_attr to class indices
-        edge_classes = data.edge_attr.argmax(dim=-1)
-
-        # Use Cross-Entropy Loss for edge features
+        # Bond type loss
+        edge_classes = data.edge_attr[existing_edges].argmax(dim=-1)
         edge_loss = F.cross_entropy(edge_features, edge_classes)
         logger.debug(f"Edge feature loss: {edge_loss.item():.6f}")
 
@@ -230,24 +225,20 @@ class PropertyConditionedVAE(Module):
         # KL divergence loss
         kl_loss = -0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp()) / data.batch.max().item()
         logger.debug(f"KL divergence loss: {kl_loss.item():.6f}")
-        logger.debug(f"KL divergence weight: {kl_weight:.6f}")
 
         # Property prediction loss
         target_property = data.y[:, 4:5]
         property_loss = F.mse_loss(property_pred, target_property)
         logger.debug(f"Property prediction loss: {property_loss.item():.6f}")
-        logger.debug(f"Property prediction weight: {property_weight:.6f}")
 
         # Combine reconstruction losses
-        recon_loss = node_loss + distance_loss + direction_loss + edge_loss + num_nodes_loss
+        recon_loss = node_loss + edge_existence_loss + distance_loss + direction_loss + edge_loss + num_nodes_loss
         logger.debug(f"Reconstruction loss: {recon_loss.item():.6f}")
-        logger.debug(f"Reconstruction weight: {recon_weight:.6f}")
 
         # Total loss
         total_loss = (recon_weight * recon_loss +
                       kl_weight * kl_loss +
                       property_weight * property_loss)
-        total_loss += 0.1 * distance_regularization  # Adjust weight as needed
         logger.debug(f"Total loss: {total_loss.item():.6f}")
 
         return total_loss

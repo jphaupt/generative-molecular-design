@@ -29,3 +29,15 @@ class CompleteGraph(object):
         data.edge_index = edge_index
 
         return data
+
+class AddEdgeExistence(object):
+    """
+    This transform adds an edge_existence attribute to the data object.
+    The edge_existence attribute is a tensor of ones, indicating that all
+    edges in edge_index exist in sparse graphs.
+    """
+    def __call__(self, data):
+        # All edges in edge_index exist in sparse graphs
+        edge_existence = torch.ones(data.edge_index.shape[1], dtype=torch.float32)
+        data.edge_existence = edge_existence
+        return data
