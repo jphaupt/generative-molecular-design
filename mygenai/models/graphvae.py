@@ -64,11 +64,10 @@ class PropertyConditionedVAE(Module):
         torch.Tensor
             Sampled latent vector.
         """
-        if self.training:
-            std = torch.exp(0.5 * log_var)
-            eps = torch.randn_like(std)
-            return mu + eps * std
-        return mu
+        # The small epsilon prevents underflow for very negative log_var
+        std = torch.exp(0.5 * log_var) + 1e-10
+        eps = torch.randn_like(std)
+        return mu + eps * std
 
     def forward(self, data, target_property=None):
         """
@@ -104,6 +103,10 @@ class PropertyConditionedVAE(Module):
             logger.debug(f"Forward called with target_property shape: {target_property.shape}")
         else:
             logger.debug("Forward called without target_property (None)")
+
+        # Add small noise to node positions during training
+        if self.training:
+            data.pos = data.pos + torch.randn_like(data.pos) * 0.01
 
         # Encode
         mu, log_var, property_pred = self.encoder(data)
@@ -200,9 +203,10 @@ class PropertyConditionedVAE(Module):
 
         # Distance reconstruction loss
         ground_truth_distances = torch.norm(data.pos[data.edge_index[1]] - data.pos[data.edge_index[0]], dim=1, keepdim=True)
+        normalized_gt_distances = (ground_truth_distances - self.decoder.min_distance) / (self.decoder.max_distance - self.decoder.min_distance)
         distance_loss = F.mse_loss(
             distances[existing_edges],
-            ground_truth_distances[existing_edges]
+            normalized_gt_distances[existing_edges]
         )
 
         # Direction reconstruction loss
@@ -223,7 +227,7 @@ class PropertyConditionedVAE(Module):
         logger.debug(f"Number of nodes loss: {num_nodes_loss.item():.6f}")
 
         # KL divergence loss
-        kl_loss = -0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp()) / data.batch.max().item()
+        kl_loss = -0.5 * torch.mean(1 + log_var - mu.pow(2) - log_var.exp())
         logger.debug(f"KL divergence loss: {kl_loss.item():.6f}")
 
         # Property prediction loss
@@ -231,9 +235,27 @@ class PropertyConditionedVAE(Module):
         property_loss = F.mse_loss(property_pred, target_property)
         logger.debug(f"Property prediction loss: {property_loss.item():.6f}")
 
-        # Combine reconstruction losses
-        recon_loss = node_loss + edge_existence_loss + distance_loss + direction_loss + edge_loss + num_nodes_loss
+        component_weights = {
+            'node': 50.0,
+            'edge_existence': 20.0,
+            'distance': 100.0,  # Make this very important
+            'direction': 50.0,
+            'edge': 50.0,
+            'num_nodes': 10.0
+        }
+        recon_loss = (component_weights['node'] * node_loss +
+                      component_weights['edge_existence'] * edge_existence_loss +
+                      component_weights['distance'] * distance_loss +
+                      component_weights['direction'] * direction_loss +
+                      component_weights['edge'] * edge_loss +
+                      component_weights['num_nodes'] * num_nodes_loss)
         logger.debug(f"Reconstruction loss: {recon_loss.item():.6f}")
+
+        # Log individual loss components
+        logger.info(f"Loss components - Node: {node_loss:.6f}, Edge: {edge_loss:.6f}, "
+                    f"Edge Existence: {edge_existence_loss:.6f}, Distance: {distance_loss:.6f}, "
+                    f"Direction: {direction_loss:.6f}, Num Nodes: {num_nodes_loss:.6f}, "
+                    f"KL: {kl_loss:.6f}, Property: {property_loss:.6f}")
 
         # Total loss
         total_loss = (recon_weight * recon_loss +

@@ -1,7 +1,8 @@
 import logging
 import torch
-from torch.nn import Linear, ReLU, BatchNorm1d, Module, Sequential, Sigmoid, Tanh, Softmax
-
+from torch.nn import Linear, ReLU, BatchNorm1d, Module, Sequential, Sigmoid, Tanh, Softmax, LayerNorm
+import torch.nn.functional as F
+from mygenai.models.layers import EquivariantMPNNLayer
 class ConditionalDecoder(Module):
     def __init__(self, latent_dim=32, emb_dim=64, out_node_dim=5, out_edge_dim=4, max_distance=2.0, min_distance=0.8):
         """
@@ -52,9 +53,20 @@ class ConditionalDecoder(Module):
         self.max_distance = max_distance
         self.min_distance = min_distance
 
+        # Increase model capacity
+        hidden_dim = 128
+
         # Initial projection from latent+property space
         # Input: (batch_size, latent_dim + 1) -> Output: (batch_size, emb_dim)
         self.lin_latent = Linear(latent_dim + 1, emb_dim)
+
+        # Node embedding transformation
+        self.node_transform = Sequential(
+            Linear(emb_dim, hidden_dim),
+            BatchNorm1d(hidden_dim),
+            ReLU(),
+            Linear(hidden_dim, emb_dim)
+        )
 
         # Node feature generation
         # Input: (n, emb_dim) -> Output: (n, out_node_dim)
@@ -66,12 +78,20 @@ class ConditionalDecoder(Module):
             Softmax(dim=-1)  # One-hot encoding
         )
 
+        # Edge MLP with more capacity
+        self.edge_mlp = Sequential(
+            Linear(2 * emb_dim, hidden_dim),
+            ReLU(),
+            Linear(hidden_dim, hidden_dim),
+            ReLU(),
+            Linear(hidden_dim, emb_dim)
+        )
+
         # Edge existence prediction
         # Input: (e, 2 * emb_dim) -> Output: (e, 1)
         self.edge_existence = Sequential(
             Linear(2 * emb_dim, emb_dim),
             ReLU(),
-            BatchNorm1d(emb_dim),
             Linear(emb_dim, 1),
             Sigmoid()  # Output in [0, 1]
         )
@@ -81,7 +101,6 @@ class ConditionalDecoder(Module):
         self.distance_decoder = Sequential(
             Linear(2 * emb_dim, emb_dim),
             ReLU(),
-            BatchNorm1d(emb_dim),
             Linear(emb_dim, 1),
             Sigmoid()  # Constrain output to [0, 1]
         )
@@ -89,18 +108,23 @@ class ConditionalDecoder(Module):
         # Direction vector prediction (unit vectors)
         # Input: (e, 2 * emb_dim) -> Output: (e, 3)
         self.direction_decoder = Sequential(
-            Linear(2 * emb_dim, emb_dim),
+            Linear(2 * emb_dim, hidden_dim),
+            LayerNorm(hidden_dim),
             ReLU(),
-            BatchNorm1d(emb_dim),
-            Linear(emb_dim, 3)
+            Linear(hidden_dim, hidden_dim),
+            ReLU(),
+            Linear(hidden_dim, 3)
         )
+        # Initialize with random unit vectors
+        with torch.no_grad():
+            rand_dirs = torch.randn(self.direction_decoder[-1].weight.shape)
+            self.direction_decoder[-1].weight.data = F.normalize(rand_dirs, dim=1)
 
         # Edge property prediction (e.g., bond type)
         # Input: (e, 2 * emb_dim) -> Output: (e, out_edge_dim)
         self.edge_features = Sequential(
             Linear(2 * emb_dim, emb_dim),
             ReLU(),
-            BatchNorm1d(emb_dim),
             Linear(emb_dim, out_edge_dim),
             Softmax(dim=-1)  # Predicts probabilities for each bond type
         )
@@ -114,6 +138,18 @@ class ConditionalDecoder(Module):
             Linear(emb_dim, 1),
             ReLU()  # Predicts a positive scalar
         )
+
+        # Add this projection for message passing compatibility
+        self.edge_proj = Sequential(
+            Linear(2 * emb_dim, hidden_dim),
+            ReLU(),
+            Linear(hidden_dim, hidden_dim),
+            ReLU(),
+            Linear(hidden_dim, out_edge_dim)
+        )
+
+        # Equivariant MPNN layer for position refinement
+        self.decoder_mpnn = EquivariantMPNNLayer(emb_dim, out_edge_dim)
 
     def forward(self, z, target_property, data):
         """
@@ -149,38 +185,49 @@ class ConditionalDecoder(Module):
         # Output: h_expanded (n, emb_dim)
         h_expanded = h[data.batch]
 
+        # Transform node embeddings
+        h_expanded = self.node_transform(h_expanded)
+
         # Predict node features
         # Input: h_expanded (n, emb_dim)
         # Output: node_features (n, out_node_dim)
         node_features = self.node_decoder(h_expanded)
 
         # Combine node embeddings for edge prediction
-        # Input: h_expanded (n, emb_dim), data.edge_index (2, e)
-        # Output: edge_inputs (e, 2 * emb_dim)
-        src, dst = data.edge_index  # Precomputed complete graph
-        edge_inputs = torch.cat([h_expanded[src], h_expanded[dst]], dim=1)
+        src, dst = data.edge_index
+        edge_inputs_original = torch.cat([h_expanded[src], h_expanded[dst]], dim=1)
 
-        # Predict edge existence
-        # Input: edge_inputs (e, 2 * emb_dim)
-        # Output: edge_existence (e, 1)
-        edge_existence = self.edge_existence(edge_inputs)
+        # Apply transformation for general edge embeddings if needed elsewhere
+        edge_embedded = self.edge_mlp(edge_inputs_original)
 
-        # Predict distances for edges
-        # Input: edge_inputs (e, 2 * emb_dim)
-        # Output: distances (e, 1)
-        distances = self.distance_decoder(edge_inputs)
-        distances = distances * (self.max_distance - self.min_distance) + self.min_distance
+        # Use ORIGINAL edge inputs for predictions
+        edge_existence = self.edge_existence(edge_inputs_original)
+        distances = self.distance_decoder(edge_inputs_original)
+        edge_features = self.edge_features(edge_inputs_original)
 
-        # Predict direction vectors for edges
-        # Input: edge_inputs (e, 2 * emb_dim)
-        # Output: directions (e, 3)
-        directions = self.direction_decoder(edge_inputs)
-        directions = directions / (torch.norm(directions, dim=1, keepdim=True) + 1e-10)  # Normalize to unit vectors
+        # Generate initial positions (randomly placed in space)
+        batch_size = z.shape[0]
+        radius = 1.0  # Initial radius
+        pos_init = torch.randn(h_expanded.shape[0], 3).to(z.device)
+        pos_init = radius * F.normalize(pos_init, dim=1)  # Normalize to unit sphere
 
-        # Predict bond types for edges
-        # Input: edge_inputs (e, 2 * emb_dim)
-        # Output: edge_features (e, out_edge_dim)
-        edge_features = self.edge_features(edge_inputs)
+        # Project edge features to the expected dimension
+        edge_attr = self.edge_proj(edge_inputs_original)  # Project from 2*emb_dim to out_edge_dim
+
+        # Refine positions using message passing
+        pos = pos_init
+        for i in range(6):
+            h_update, pos_delta = self.decoder_mpnn(h_expanded, pos, data.edge_index, edge_attr)
+            h_expanded = h_expanded + h_update
+
+            # More controlled updates with each iteration
+            step_size = 0.5 / (i + 1)
+            pos = pos + step_size * pos_delta
+
+        # Now extract directions from refined positions
+        src, dst = data.edge_index
+        rel_pos = pos[dst] - pos[src]
+        directions = rel_pos / (torch.norm(rel_pos, dim=1, keepdim=True) + 1e-10)
 
         # Predict number of nodes
         # Input: h (batch_size, emb_dim)
