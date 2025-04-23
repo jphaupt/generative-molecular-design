@@ -22,9 +22,15 @@ $2|E|$-dimensional object that describes edge connectivity.
 
 ### Edge features `data.edge_attr`
 
+$4|E|$-dimensional tensor. One-hot encoding for bond type: single, double, triple or aromatic.
+
 ### Atom positions `data.pos`
 
+$3|V|$-dimensional tensor. 3D coordinates of each atom in the molecule. NOTE these are absolute coordinates, so we will need to process them somehow!
+
 ### Target `data.y`
+
+$19$-dimensional vector. Each entry corresponds to a molecular property. Here we focus on the HOMO-LUMO gap, which is the fifth (index four).
 
 ### E.g. Water (H2O)
 
@@ -51,23 +57,36 @@ i.e. index 0 and 1 are connected; 0 and 2 are connected.
 
 #### Edge features
 
+TODO
 
 #### Atom positions
 
+TODO
+
 #### Target
 
+TODO
 
 ### Additional notes
 
-In [the tutorial](notebooks/geometric_gnn_101.ipynb) we use fully connected graphs. However, I am not convinced this is suitable for a GraphVAE, as that can cause a lot of additional complexity and we are not really using the benefit of knowing bond type and enforcing physicality using edge attributes. Therefore, I think I should stick with a **sparse graph** representation.
+In [the tutorial](notebooks/geometric_gnn_101.ipynb) we use fully connected graphs. However, I am not convinced this is suitable for a GraphVAE, as that can cause a lot of additional complexity and we are not really using the benefit of knowing bond type and enforcing physicality using edge attributes. Therefore, I think I should stick with a **sparse graph** representation. If this does not work well, maybe we can use fully connected graphs and add an additional edge feature to indicate no bond.
 
 ## Equivariant Message-Passing NN Layer
 
+TODO
 
 ## Equivariant Graph MPNN Predictor
 
+TODO
+
 ## MPNN Encoder
+
+TODO
 
 ## MPNN Decoder
 
+TODO
+
 ## Graph Message-Passing Variational Autoencoder
+
+TODO
