@@ -16,7 +16,7 @@ $11|V|$-dimensional, but we only worry about the first **5 features**, which are
 
 ### Edge indices `data.edge_index`
 
-Each edge in the input graph represents a bond in a molecule. If the edge does not exist, there is no bonding.
+Each edge in the input graph represents a bond in a molecule. If the edge does not exist, there is no bonding. Since we are not assuming a complete graph, this is a useful feature.
 
 $2|E|$-dimensional object that describes edge connectivity.
 
@@ -25,6 +25,37 @@ $2|E|$-dimensional object that describes edge connectivity.
 ### Atom positions `data.pos`
 
 ### Target `data.y`
+
+### E.g. Water (H2O)
+
+#### Node features
+```
+test_mol.x[:, :5] =
+tensor([[0., 0., 0., 1., 0.],
+        [1., 0., 0., 0., 0.],
+        [1., 0., 0., 0., 0.]])
+```
+
+i.e. first atom is O, second and third are H.
+
+#### Edge index
+```
+tensor([[0, 0, 1, 2],
+        [1, 2, 0, 0]])
+```
+
+i.e. index 0 and 1 are connected; 0 and 2 are connected.
+     then so are 1 and 0; 2 and 0.
+     Worth noting these are symmetric since bonds are not directed
+     - maybe can make use of this?
+
+#### Edge features
+
+
+#### Atom positions
+
+#### Target
+
 
 ### Additional notes
 
