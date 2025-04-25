@@ -1,11 +1,12 @@
 import torch
 from torch.nn import Linear, ReLU, BatchNorm1d, Module, Sequential
-from torch_geometric.nn import global_mean_pool
+from torch_geometric.nn import global_mean_pool, GCNConv, GINEConv
 
 from mygenai.models.layers import EquivariantMPNNLayer
 
 class Encoder(Module):
-    def __init__(self, emb_dim=64, in_dim=5, edge_dim=4, latent_dim=32, max_distance=2.0, min_distance=0.8):
+    def __init__(self, emb_dim=64, in_dim=5, edge_dim=4, latent_dim=32,
+                 num_layers=2, max_distance=2.0, min_distance=0.8):
         """Encoder module for graph property prediction
 
         Args:
@@ -16,8 +17,8 @@ class Encoder(Module):
             min_distance: (float) - minimum distance for edge filtering
         """
         super().__init__()
-        self.max_distance = max_distance
-        self.min_distance = min_distance
+        # self.max_distance = max_distance
+        # self.min_distance = min_distance
 
         # Linear projection for initial node features
         # dim: d_n -> d
@@ -25,8 +26,9 @@ class Encoder(Module):
 
         # Stack of MPNN layers
         self.convs = torch.nn.ModuleList()
-        for layer in range(2):
-            self.convs.append(EquivariantMPNNLayer(emb_dim, edge_dim, aggr='add', max_distance=max_distance, min_distance=min_distance))
+        for _ in range(num_layers):
+            # self.convs.append(EquivariantMPNNLayer(emb_dim, edge_dim, aggr='add', max_distance=max_distance, min_distance=min_distance))
+            self.convs.append(GCNConv(emb_dim, emb_dim, aggr='add'))
 
         # Global pooling/readout function `R` (mean pooling)
         # PyG handles the underlying logic via `global_mean_pool()`
@@ -40,7 +42,7 @@ class Encoder(Module):
         self.property_predictor = Sequential(
             Linear(latent_dim, emb_dim),
             ReLU(),
-            BatchNorm1d(emb_dim),
+            # BatchNorm1d(emb_dim),
             Linear(emb_dim, 1)
         )
 
@@ -55,17 +57,12 @@ class Encoder(Module):
             property_pred: Predicted property (batch_size, 1)
         """
         h = self.lin_in(data.x) # (n, d_n) -> (n, d)
-        pos = data.pos
+        # pos = data.pos
 
         for conv in self.convs:
             # Message passing layer
-            h_update, pos_update = conv(h, pos, data.edge_index, data.edge_attr)
-
-            # Update node features
-            h = h + h_update # (n, d) -> (n, d)
-
-            # Update node coordinates
-            pos = pos_update # (n, 3) -> (n, 3)
+            # h_update, pos_update = conv(h, pos, data.edge_index, data.edge_attr)
+            h = conv(h, data.edge_index)
 
         # Pool to graph level
         h_graph = self.pool(h, data.batch) # (n, d) -> (batch_size, d)

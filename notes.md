@@ -34,6 +34,8 @@ $19$-dimensional vector. Each entry corresponds to a molecular property. Here we
 
 ### E.g. Water (H2O)
 
+Third (i.e. index 2) data object in QM9
+
 #### Node features
 ```
 test_mol.x[:, :5] =
@@ -57,19 +59,75 @@ i.e. index 0 and 1 are connected; 0 and 2 are connected.
 
 #### Edge features
 
-TODO
+```
+test_mol.edge_attr =
+tensor([[1., 0., 0., 0.],
+        [1., 0., 0., 0.],
+        [1., 0., 0., 0.],
+        [1., 0., 0., 0.]])
+```
+
+i.e. all of them are single bonds.
 
 #### Atom positions
 
-TODO
+```
+tensor([[-3.4400e-02,  9.7750e-01,  7.6000e-03],
+        [ 6.4800e-02,  2.0600e-02,  1.5000e-03],
+        [ 8.7180e-01,  1.3008e+00,  7.0000e-04]])
+```
 
 #### Target
 
-TODO
+```
+test_mol.y[:,4] =
+tensor([9.8369])
+```
 
 ### Additional notes
 
 In [the tutorial](notebooks/geometric_gnn_101.ipynb) we use fully connected graphs. However, I am not convinced this is suitable for a GraphVAE, as that can cause a lot of additional complexity and we are not really using the benefit of knowing bond type and enforcing physicality using edge attributes. Therefore, I think I should stick with a **sparse graph** representation. If this does not work well, maybe we can use fully connected graphs and add an additional edge feature to indicate no bond.
+
+QM9 has several isomers. To avoid leakage, might make sense to split by molecular formula (or at least scaffold) rather than random rows. E.g. strip each molecule to its Bemis‑Murcko scaffold (ring system + linkers), group by scaffold and split data based on scaffolds.
+
+## Plan of action
+
+### Documenting progress
+
+Keeping a log of different versions here, along with .yaml files for each version (v0.yaml, etc.). Store dataset options, model hyper-params, training params, random seed (for reproducibility). Recreate results like `python train.py --config conf/v0.yaml`. I will make each additional version from optional keyword arguments to the models.
+
+All the while writing unit tests using pytest, including one where I simply reconstruct one molecule with an overfit model. Tiny sanity loader test, single-molecule overfit, gradient-flow check (no names, params norms < 1e3).
+
+Document git hashes and use git tags for when each model version is done.
+
+### v0
+
+ - Primarily intended as a pipeline sanity check
+ - Padded input with 29 nodes (largest molecule in QM9),
+ - Only encode/decode with reconstruction loss,
+ - Encoder: simple GCNConv
+   - GCNConv x num_layers
+   - Ignore edge_attr for now
+ - Decoder: complete/dense graph -> 29*(29+1)/2 = 406 edges,
+   - Dense, fixed-size tensors
+   - Masked padded nodes/edges for cross entropy loss
+
+### v0.1
+
+ - GINEConv Encoder -- produce edge attributes (not just existence), introduces edge_attr
+ - Same decoder
+
+### v0.3 - ?
+
+ - order not decided yet:
+   - Coordinate awareness
+   - Sparse decoder
+   - add KL sampling for regularisation
+   - Structured latent space search (reinforcement learning)
+
+
+# Previous approach's models
+Jumped too deep I think. Using a simple approach now and increase complexity incrementally.
 
 ## Equivariant Message-Passing NN Layer
 

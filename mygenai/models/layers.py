@@ -3,7 +3,6 @@ import torch.nn.functional as F
 from torch.nn import Linear, ReLU, BatchNorm1d, Module, Sequential
 from torch_geometric.nn import MessagePassing
 from torch_scatter import scatter
-# TODO decoder has changed for distance reconstruction so this probably needs to change too?
 class EquivariantMPNNLayer(MessagePassing):
     def __init__(self, emb_dim=64, edge_dim=4, aggr='add', max_distance=2.0, min_distance=0.8):
         """
