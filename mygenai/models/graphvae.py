@@ -8,7 +8,7 @@ from mygenai.models.encoders import GraphEncoder
 from mygenai.models.decoders import GraphDecoder
 
 class GraphVAE(Module):
-    def __init__(self, node_feat_dim=5, emb_dim=32, latent_dim=32):
+    def __init__(self, node_feat_dim=6, emb_dim=32, latent_dim=32):
         super().__init__()
         self.encoder = GraphEncoder(node_feat_dim=node_feat_dim, emb_dim=emb_dim,
                                     latent_dim=latent_dim)

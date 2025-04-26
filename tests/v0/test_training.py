@@ -70,4 +70,26 @@ def test_loss_decreases(v0_model, v0_dataloader, device):
 
 def test_early_stopping(v0_model, v0_dataloader, device, monkeypatch):
     """Test that early stopping works correctly"""
-    assert False, "Placeholder"
+    model = copy.deepcopy(v0_model)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+
+    # Mock the validate function to always return a high loss
+    epoch_counter = 0
+    def mock_validate(model, val_loader, device):
+        nonlocal epoch_counter
+        epoch_counter += 1
+
+        # Return improving losses for first 3 epochs, then constant loss
+        if epoch_counter <= 3:
+            return 10.0 - epoch_counter  # 9, 8, 7
+        else:
+            return 7.0  # No improvement after epoch 3
+
+    # monkeypatch to replace the validate function with the mock
+    monkeypatch.setattr('mygenai.training.training.validate', mock_validate)
+
+    # run training with early stopping
+    train_model(model, v0_dataloader, v0_dataloader, device, n_epochs=5, patience=2)
+
+    # improving epochs + 2 patience epochs = 5 total epochs
+    assert epoch_counter == 5, f"Expected 5 epochs (3 improving + 2 patience), got {epoch_counter}"

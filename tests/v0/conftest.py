@@ -47,3 +47,11 @@ def v0_random_latent_vector(v0_single_batch, device):
     batch_size = v0_single_batch.num_graphs
     latent_dim = 32
     return torch.randn(batch_size, latent_dim).to(device)
+
+@fixture
+def water_molecule(v0_qm9_dataset):
+    # with v0_transforms
+    # x = [29, 5]
+    # edge_index = [2, 812]
+    # edge_attr = [812, 4]
+    return v0_qm9_dataset[2]

@@ -5,14 +5,14 @@ from torch_geometric.nn import global_mean_pool, GCNConv, GINEConv
 from mygenai.models.layers import EquivariantMPNNLayer
 
 # n: Total number of nodes across all graphs in batch
-# d_n: Input node feature dimension (= 5)
+# d_n: Input node feature dimension (= 5 + "no atom")
 # d: Embedding dimension (= 64)
 #    Use same initial embedding and hidden layer dimensions
 # b: Batch size (number of graphs)
 # L: Latent dimension (= 32)
 
 class GraphEncoder(Module):
-    def __init__(self, emb_dim=32, node_feat_dim=5, latent_dim=32, num_layers=2):
+    def __init__(self, emb_dim=32, node_feat_dim=6, latent_dim=32, num_layers=2):
         """Encoder module for graph property prediction
         """
         super().__init__()

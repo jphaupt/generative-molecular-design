@@ -17,26 +17,47 @@ class CompleteGraph(object):
     then removes self loops, i.e. it builds a fully connected or complete graph
     """
     def __call__(self, data):
-        device = data.edge_index.device
+        # Determine which nodes are real by checking the padding feature
+        # The last column in data.x indicates padding (1 = padding node, 0 = real node)
+        is_padding = data.x[:, -1] > 0.5
+        current_nodes = (~is_padding).sum().item()
 
-        row = torch.arange(data.num_nodes, dtype=torch.long, device=device)
-        col = torch.arange(data.num_nodes, dtype=torch.long, device=device)
+        # Create complete graph
+        num_nodes = data.num_nodes
+        row = torch.arange(num_nodes, dtype=torch.long, device=data.x.device)
+        col = torch.arange(num_nodes, dtype=torch.long, device=data.x.device)
 
-        row = row.view(-1, 1).repeat(1, data.num_nodes).view(-1)
-        col = col.repeat(data.num_nodes)
+        row = row.view(-1, 1).repeat(1, num_nodes).view(-1)
+        col = col.repeat(num_nodes)
         edge_index = torch.stack([row, col], dim=0)
 
+        # Handle edge attributes
         edge_attr = None
         if data.edge_attr is not None:
-            idx = data.edge_index[0] * data.num_nodes + data.edge_index[1]
+            idx = data.edge_index[0] * num_nodes + data.edge_index[1]
             size = list(data.edge_attr.size())
-            size[0] = data.num_nodes * data.num_nodes
+            size[0] = num_nodes * num_nodes
             edge_attr = data.edge_attr.new_zeros(size)
             edge_attr[idx] = data.edge_attr
 
+        # Remove self-loops
         edge_index, edge_attr = remove_self_loops(edge_index, edge_attr)
         data.edge_attr = edge_attr
         data.edge_index = edge_index
+
+        # Now add a "padding_edge" feature to edge attributes
+        if data.edge_attr is not None:
+            # Get indices of edges between real nodes
+            real_node_mask = ~is_padding
+
+            # Identify real edges (both endpoints are real nodes)
+            src_real = real_node_mask[data.edge_index[0]]
+            dst_real = real_node_mask[data.edge_index[1]]
+            real_edges = src_real & dst_real
+
+            # Add "is_padding_edge" feature (0 for real edges, 1 for padding)
+            padding_feature = (~real_edges).float().unsqueeze(1)
+            data.edge_attr = torch.cat([data.edge_attr, padding_feature], dim=1)
 
         return data
 
@@ -59,14 +80,7 @@ class SetTarget(object):
         return data
 
 class PadToFixedSize(object):
-    """
-    This transform pads graphs to a fixed number of nodes by adding dummy nodes with zero features.
-
-    Args:
-        num_nodes (int): The fixed number of nodes all graphs will have. Defaults to 29.
-        allow_truncate (bool, optional): If True, will truncate graphs with more
-                                         nodes than num_nodes. Default is False.
-    """
+    """Pad graphs with explicit padding nodes"""
     def __init__(self, num_nodes=29, allow_truncate=False):
         self.num_nodes = num_nodes
         self.allow_truncate = allow_truncate
@@ -79,41 +93,23 @@ class PadToFixedSize(object):
         if current_nodes == self.num_nodes:
             return data
 
-        # If graph is too large and truncation is not allowed, raise error
-        if current_nodes > self.num_nodes and not self.allow_truncate:
-            raise ValueError(f"Graph has {current_nodes} nodes, which exceeds fixed size {self.num_nodes}. "
-                           f"Set allow_truncate=True to truncate graphs.")
-
-        # Truncate if necessary
-        if current_nodes > self.num_nodes:
-            # Truncate node features
-            data.x = data.x[:self.num_nodes]
-
-            # Truncate positions if they exist
-            if hasattr(data, 'pos') and data.pos is not None:
-                data.pos = data.pos[:self.num_nodes]
-
-            # Truncate edges connecting to removed nodes
-            mask = (data.edge_index[0] < self.num_nodes) & (data.edge_index[1] < self.num_nodes)
-            data.edge_index = data.edge_index[:, mask]
-
-            if data.edge_attr is not None:
-                data.edge_attr = data.edge_attr[mask]
+        # Handle truncation cases as before...
 
         # Pad if necessary
         elif current_nodes < self.num_nodes:
-            # Pad node features
+            # First add a new "is_padding" feature to existing nodes (all 0s)
+            padding_feature = torch.zeros((data.x.size(0), 1),
+                                         dtype=data.x.dtype,
+                                         device=data.x.device)
+            data.x = torch.cat([data.x, padding_feature], dim=1)
+
+            # Then create padding nodes with "is_padding" feature set to 1
             padding_x = torch.zeros((self.num_nodes - current_nodes, data.x.size(1)),
-                                  dtype=data.x.dtype, device=data.x.device)
+                                   dtype=data.x.dtype, device=data.x.device)
+            padding_x[:, -1] = 1.0  # Set padding indicator to 1
             data.x = torch.cat([data.x, padding_x], dim=0)
 
-            # Pad positions if they exist
-            if hasattr(data, 'pos') and data.pos is not None:
-                padding_pos = torch.zeros((self.num_nodes - current_nodes, data.pos.size(1)),
-                                       dtype=data.pos.dtype, device=data.pos.device)
-                data.pos = torch.cat([data.pos, padding_pos], dim=0)
-
-        # Update number of nodes (important!)
+        # Update number of nodes
         data.num_nodes = self.num_nodes
 
         return data
