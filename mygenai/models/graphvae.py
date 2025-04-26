@@ -2,6 +2,7 @@ import logging
 import torch
 import torch.nn.functional as F
 from torch.nn import Module
+from torch_geometric.utils import to_dense_adj
 
 from mygenai.models.encoders import GraphEncoder
 from mygenai.models.decoders import GraphDecoder
@@ -24,7 +25,12 @@ class GraphVAE(Module):
         logits = self.decoder(z)
         return logits, mu, logvar, property_pred
 
-    def loss_function(self, logits, node_feats):
-        # Reconstruction loss (assuming node_feats are real-valued)
-        recon_loss = F.mse_loss(logits, node_feats, reduction='sum')
+    def loss_function(self, logits, batch):
+        # create ground-truth adjacency matrices using PyG utility
+        adj_target = to_dense_adj(batch.edge_index, batch=batch.batch,
+                                  max_num_nodes=logits.size(1))
+
+        # binary cross entropy for adjacency matrix reconstruction
+        recon_loss = F.binary_cross_entropy_with_logits(logits, adj_target)
+
         return recon_loss
