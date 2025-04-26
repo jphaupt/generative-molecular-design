@@ -124,6 +124,8 @@ Document git hashes and use git tags for when each model version is done.
      - [x] QM9 dataset (with various transforms)
      - [x] dataloader
      - [x] single batch
+     - [ ] test transformations
+       - [ ] in particular, check that a molecule from a transformed dataset looks the way you expect
      - [ ] single molecule
      - [ ] random dataset
 

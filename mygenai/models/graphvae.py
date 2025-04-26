@@ -25,12 +25,18 @@ class GraphVAE(Module):
         logits = self.decoder(z)
         return logits, mu, logvar, property_pred
 
-    def loss_function(self, logits, batch):
+    def loss_function(self, edge_attr_logits, batch):
         # create ground-truth adjacency matrices using PyG utility
-        adj_target = to_dense_adj(batch.edge_index, batch=batch.batch,
-                                  max_num_nodes=logits.size(1))
+        adj_target = to_dense_adj(
+            batch.edge_index,
+            batch=batch.batch,
+            max_num_nodes=edge_attr_logits.size(1),
+            edge_attr=batch.edge_attr
+        )
 
         # binary cross entropy for adjacency matrix reconstruction
-        recon_loss = F.binary_cross_entropy_with_logits(logits, adj_target)
+        recon_loss = F.binary_cross_entropy_with_logits(edge_attr_logits, adj_target)
 
         return recon_loss
+
+# TODO interpret molecular graph function

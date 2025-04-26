@@ -17,15 +17,17 @@ def test_encoder_dimensions(v0_model, v0_single_batch):
 def test_decoder_dimensions(v0_model, v0_single_batch, v0_random_latent_vector):
     batch_size = v0_single_batch.num_graphs
     edge_logits = v0_model.decoder(v0_random_latent_vector)
-    assert edge_logits.shape == (batch_size, v0_model.decoder.num_nodes, v0_model.decoder.num_nodes), \
-        f"Expected edge_logits shape {(batch_size, v0_model.decoder.num_nodes, v0_model.decoder.num_nodes)}, got {edge_logits.shape}"
+    num_edge_attr = 5 # 4 bond types + 1 for no bond
+    assert edge_logits.shape == (batch_size, v0_model.decoder.num_nodes, v0_model.decoder.num_nodes, num_edge_attr), \
+        f"Expected edge_logits shape {(batch_size, v0_model.decoder.num_nodes, v0_model.decoder.num_nodes, num_edge_attr)}, got {edge_logits.shape}"
 
 def test_graphvae_dimensions(v0_model, v0_single_batch):
     logits, mu, logvar, property_pred = v0_model(v0_single_batch)
     batch_size = v0_single_batch.num_graphs
     emb_dim = 32
-    assert logits.shape == (batch_size, v0_model.decoder.num_nodes, v0_model.decoder.num_nodes), \
-        f"Expected logits shape {(batch_size, v0_model.decoder.num_nodes, v0_model.decoder.num_nodes)}, got {logits.shape}"
+    num_edge_attr = 5
+    assert logits.shape == (batch_size, v0_model.decoder.num_nodes, v0_model.decoder.num_nodes, num_edge_attr), \
+    f"Expected logits shape {(batch_size, v0_model.decoder.num_nodes, v0_model.decoder.num_nodes, num_edge_attr)}, got {logits.shape}"
     assert mu.shape == (batch_size, emb_dim), f"Expected mu shape {(batch_size, emb_dim)}, got {mu.shape}"
     assert logvar.shape == (batch_size, emb_dim), f"Expected logvar shape {(batch_size, emb_dim)}, got {logvar.shape}"
     assert property_pred.shape == (batch_size, 1), f"Expected property_pred shape {(batch_size, 1)}, got {property_pred.shape}"
