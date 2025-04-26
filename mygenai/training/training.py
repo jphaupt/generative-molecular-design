@@ -9,7 +9,7 @@ def train_epoch(model, optimizer, train_loader, device):
         optimizer.zero_grad()
 
         # Forward pass
-        logits, mu, logvar = model(batch)
+        logits, mu, logvar, property_pred = model(batch)
 
         # Calculate loss
         loss = model.loss_function(logits, batch)
@@ -32,7 +32,7 @@ def validate(model, val_loader, device):
             batch = batch.to(device)
 
             # Forward pass
-            logits, mu, logvar = model(batch)
+            logits, mu, logvar, property_pred = model(batch)
 
             # Calculate loss
             loss = model.loss_function(logits, batch)

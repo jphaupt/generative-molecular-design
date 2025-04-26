@@ -114,18 +114,19 @@ Document git hashes and use git tags for when each model version is done.
    - Dense, fixed-size tensors
    - Masked padded nodes/edges for cross entropy loss
  - unit tests!
-   - tensor dimension matches
-   - can overfit to recreate a molecule
-   - reasonable loss function
-   - NaN values in the model outputs or loss
-   - check forward pass for all models succeed
-   - have several different choices for inputs (e.g. dimensions)
-   - fixtures
-     - QM9 dataset (with various transforms)
-     - dataloader
-     - single batch
-     - single molecule
-     - random dataset
+   - [x] tensor dimension matches
+   - [ ] unit test training functions (a few epoches training, validate, test)
+   - [ ] can overfit to recreate a molecule
+   - [ ] reasonable loss values
+   - [ ] NaN values in the model outputs or loss
+   - [ ] check forward pass for all models succeed
+   - [ ] have several different choices for inputs (e.g. dimensions)
+   - [ ] fixtures
+     - [x] QM9 dataset (with various transforms)
+     - [x] dataloader
+     - [x] single batch
+     - [ ] single molecule
+     - [ ] random dataset
 
 ### v0.1
 
