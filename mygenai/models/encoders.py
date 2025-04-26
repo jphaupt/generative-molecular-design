@@ -4,30 +4,25 @@ from torch_geometric.nn import global_mean_pool, GCNConv, GINEConv
 
 from mygenai.models.layers import EquivariantMPNNLayer
 
-class Encoder(Module):
-    def __init__(self, emb_dim=64, in_dim=5, edge_dim=4, latent_dim=32,
-                 num_layers=2, max_distance=2.0, min_distance=0.8):
-        """Encoder module for graph property prediction
+# n: Total number of nodes across all graphs in batch
+# d_n: Input node feature dimension (= 5)
+# d: Embedding dimension (= 64)
+#    Use same initial embedding and hidden layer dimensions
+# b: Batch size (number of graphs)
+# L: Latent dimension (= 32)
 
-        Args:
-            emb_dim: (int) - hidden dimension `d`
-            in_dim: (int) - initial node feature dimension `d_n`
-            edge_dim: (int) - edge feature dimension `d_e`
-            max_distance: (float) - maximum distance for edge filtering
-            min_distance: (float) - minimum distance for edge filtering
+class GraphEncoder(Module):
+    def __init__(self, emb_dim=32, node_feat_dim=5, latent_dim=32, num_layers=2):
+        """Encoder module for graph property prediction
         """
         super().__init__()
-        # self.max_distance = max_distance
-        # self.min_distance = min_distance
 
-        # Linear projection for initial node features
-        # dim: d_n -> d
-        self.lin_in = Linear(in_dim, emb_dim)
+        # input shape (n, d_n) -> (n, d)
+        self.lin_in = Linear(node_feat_dim, emb_dim)
 
         # Stack of MPNN layers
         self.convs = torch.nn.ModuleList()
         for _ in range(num_layers):
-            # self.convs.append(EquivariantMPNNLayer(emb_dim, edge_dim, aggr='add', max_distance=max_distance, min_distance=min_distance))
             self.convs.append(GCNConv(emb_dim, emb_dim, aggr='add'))
 
         # Global pooling/readout function `R` (mean pooling)

@@ -102,6 +102,8 @@ Document git hashes and use git tags for when each model version is done.
 
 ### v0
 
+[v0-structure](v0.pdf)
+
  - Primarily intended as a pipeline sanity check
  - Padded input with 29 nodes (largest molecule in QM9),
  - Only encode/decode with reconstruction loss,
@@ -111,6 +113,19 @@ Document git hashes and use git tags for when each model version is done.
  - Decoder: complete/dense graph -> 29*(29+1)/2 = 406 edges,
    - Dense, fixed-size tensors
    - Masked padded nodes/edges for cross entropy loss
+ - unit tests!
+   - tensor dimension matches
+   - can overfit to recreate a molecule
+   - reasonable loss function
+   - NaN values in the model outputs or loss
+   - check forward pass for all models succeed
+   - have several different choices for inputs (e.g. dimensions)
+   - fixtures
+     - QM9 dataset (with various transforms)
+     - dataloader
+     - single batch
+     - single molecule
+     - random dataset
 
 ### v0.1
 
