@@ -31,7 +31,7 @@ class GraphDecoder(Module):
         """
         z: (batch_size, num_nodes, latent_dim)
         Returns:
-            edge_logits: (batch_size, num_nodes, num_nodes)
+            edge_logits: raw logits for edge prediction (batch_size, num_nodes, num_nodes)
         """
         batch_size = z.size(0)
 
@@ -47,7 +47,13 @@ class GraphDecoder(Module):
         edge_input = torch.cat([h_i, h_j], dim=-1)  # (batch_size, num_nodes, num_nodes, 2 * hidden_dim)
         edge_logits = self.edge_mlp(edge_input).squeeze(-1)  # (batch_size, num_nodes, num_nodes)
 
-        # Enforce symmetry: take average of i→j and j→i predictions
+        # Enforce symmetry: take average of i->j and j->i predictions
         edge_logits = 0.5 * (edge_logits + edge_logits.transpose(1, 2))
 
-        return edge_logits  # You apply sigmoid + mask + BCEWithLogitsLoss outside
+        return edge_logits  # sigmoid + mask + BCEWithLogitsLoss outside
+
+    def predict_edges(self, z, threshold=0.5):
+        edge_logits = self(z)
+        edge_probs = torch.sigmoid(edge_logits)
+        edge_pred = (edge_probs > threshold).float()
+        return edge_probs, edge_pred

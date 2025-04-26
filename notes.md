@@ -116,7 +116,6 @@ Document git hashes and use git tags for when each model version is done.
  - unit tests!
    - [x] tensor dimension matches
    - [x] unit test training functions (a few epoches training, validate, test)
-   - [ ] can overfit to recreate a molecule
    - [ ] reasonable loss values
    - [x] NaN values in the model outputs or loss
    - [x] check forward pass for all models succeed
@@ -131,9 +130,11 @@ Document git hashes and use git tags for when each model version is done.
 ### v0.1
 
  - GINEConv Encoder -- produce edge attributes (not just existence), introduces edge_attr
- - Same decoder
+ - Reconstruct both edges and nodes, where in each case there is a padded "empty" one-hot encodding (i.e. no bond or no atom)
+ - Unit tests
+   - [ ] can overfit to recreate a molecule
 
-### v0.3 - ?
+### v0.2 - ?
 
  - order not decided yet:
    - Coordinate awareness
