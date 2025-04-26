@@ -52,18 +52,6 @@ class AddEdgeExistence(object):
         data.edge_existence = edge_existence
         return data
 
-# doesn't work because these transforms are per data sample
-# class NormalizeTarget(object):
-#     """Simple transform to normalize targets to mean=0, std=1"""
-#     def __init__(self):
-#         pass
-
-#     def __call__(self, dataset):
-#         mean = dataset.y.mean(dim=0, keepdim=True)
-#         std = dataset.y.std(dim=0, keepdim=True)
-#         dataset.y = (dataset.y - mean) / std
-#         return dataset
-
 class SetTarget(object):
     def __call__(self, data):
         target = 4 # hardcoded HOMO-LUMO gap

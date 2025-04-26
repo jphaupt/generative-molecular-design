@@ -19,10 +19,10 @@ class GraphVAE(Module):
         return mu + eps * std
 
     def forward(self, node_feats):
-        mu, logvar, property_predictor = self.encoder(node_feats)
+        mu, logvar, property_pred = self.encoder(node_feats)
         z = self.reparameterize(mu, logvar)
         logits = self.decoder(z)
-        return logits, mu, logvar
+        return logits, mu, logvar, property_pred
 
     def loss_function(self, logits, node_feats):
         # Reconstruction loss (assuming node_feats are real-valued)
