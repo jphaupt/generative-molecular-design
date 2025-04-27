@@ -54,6 +54,6 @@ class GraphDecoder(Module):
 
     def predict_edges(self, z, threshold=0.5):
         edge_attr_logits = self(z)
-        edge_probs = torch.sigmoid(edge_attr_logits)
-        edge_pred = (edge_probs > threshold).float()
-        return edge_probs, edge_pred
+        # convert to probabilities using softmax along last dimension (bond types)
+        edge_probs = F.softmax(edge_attr_logits, dim=-1)
+        return edge_probs
