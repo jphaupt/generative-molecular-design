@@ -129,6 +129,11 @@ Document git hashes and use git tags for when each model version is done.
      - [ ] single molecule
      - [ ] random dataset
 
+After struggling for hours on a model only to realise the problem was in how the data was preprocessed, I think it is imperative to add, which I somehow overlooked:
+ - [ ] unit tests for transforms
+   - [ ] sanity checks (e.g. dimensions)
+   - [ ] take a known molecule (e.g. water) and feed it in, you should know the exact output; verify that it matches expectations!
+
 ### v0.1
 
  - GINEConv Encoder -- produce edge attributes (not just existence), introduces edge_attr
