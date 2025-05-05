@@ -37,7 +37,7 @@ class GraphDecoder(Module):
 
         # Project from latent to node embeddings (b,L) -> (b, (n/b)d)
         h = self.latent_to_nodes(z)
-        # Reshape
+        # reshape
         h = h.view(batch_size, self.num_nodes, self.emb_dim)
 
         # Compute all pairs
@@ -52,20 +52,20 @@ class GraphDecoder(Module):
         diagonal_mask = torch.eye(n_nodes).unsqueeze(0).expand(batch_size, -1, -1).bool().to(edge_attr_logits.device)
 
         for bond_type in range(n_bond-1):  # first indices are bond types
-            edge_attr_logits[:, :, :, bond_type][diagonal_mask] = -1000.0
-        edge_attr_logits[:, :, :, n_bond-1][diagonal_mask] = 1000.0 # last index is "no bond"
+            edge_attr_logits[:, :, :, bond_type][diagonal_mask] = float('-inf')
+        edge_attr_logits[:, :, :, n_bond-1][diagonal_mask] = float('inf') # last index is "no bond"
 
         # mask edges involving padding atoms
         real_atoms = torch.zeros(n_nodes, dtype=torch.bool).to(edge_attr_logits.device)
-        real_atoms[:-1] = True
+        real_atoms[:-1] = True # FIXME this is a bug: it makes all atoms real except the last one, but e.g. for water it's only the first 3
 
         pad_mask_i = (~real_atoms).unsqueeze(1).expand(n_nodes, n_nodes)
         pad_mask_j = (~real_atoms).unsqueeze(0).expand(n_nodes, n_nodes)
         padding_mask = (pad_mask_i | pad_mask_j).unsqueeze(0).expand(batch_size, -1, -1)
 
         for bond_type in range(n_bond-1):
-            edge_attr_logits[:, :, :, bond_type][padding_mask] = -1000.0
-        edge_attr_logits[:, :, :, n_bond-1][padding_mask] = 1000.0
+            edge_attr_logits[:, :, :, bond_type][padding_mask] = float('-inf')
+        edge_attr_logits[:, :, :, n_bond-1][padding_mask] = float('inf')
 
         # symmetry: take average of i->j and j->i predictions
         edge_attr_logits = 0.5 * (edge_attr_logits + edge_attr_logits.transpose(1, 2))

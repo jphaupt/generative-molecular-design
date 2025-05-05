@@ -12,7 +12,7 @@ from mygenai.models.layers import EquivariantMPNNLayer
 # L: Latent dimension (= 32)
 
 class GraphEncoder(Module):
-    def __init__(self, emb_dim=32, node_feat_dim=6, latent_dim=32, num_layers=2):
+    def __init__(self, emb_dim=32, node_feat_dim=6, latent_dim=32, num_layers=4):
         """Encoder module for graph property prediction
         """
         super().__init__()
