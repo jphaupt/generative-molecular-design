@@ -55,6 +55,18 @@ class GraphDecoder(Module):
             edge_attr_logits[:, :, :, bond_type][diagonal_mask] = -1000.0
         edge_attr_logits[:, :, :, n_bond-1][diagonal_mask] = 1000.0 # last index is "no bond"
 
+        # mask edges involving padding atoms
+        real_atoms = torch.zeros(n_nodes, dtype=torch.bool).to(edge_attr_logits.device)
+        real_atoms[:-1] = True
+
+        pad_mask_i = (~real_atoms).unsqueeze(1).expand(n_nodes, n_nodes)
+        pad_mask_j = (~real_atoms).unsqueeze(0).expand(n_nodes, n_nodes)
+        padding_mask = (pad_mask_i | pad_mask_j).unsqueeze(0).expand(batch_size, -1, -1)
+
+        for bond_type in range(n_bond-1):
+            edge_attr_logits[:, :, :, bond_type][padding_mask] = -1000.0
+        edge_attr_logits[:, :, :, n_bond-1][padding_mask] = 1000.0
+
         # symmetry: take average of i->j and j->i predictions
         edge_attr_logits = 0.5 * (edge_attr_logits + edge_attr_logits.transpose(1, 2))
 
