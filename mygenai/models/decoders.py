@@ -47,7 +47,15 @@ class GraphDecoder(Module):
         edge_input = torch.cat([h_i, h_j], dim=-1)  # (batch_size, num_nodes, num_nodes, 2 * hidden_dim)
         edge_attr_logits = self.edge_mlp(edge_input)  # (batch_size, num_nodes, num_nodes)
 
-        # Enforce symmetry: take average of i->j and j->i predictions
+        # mask diagonal to strongly discourage self-bonds (last index is no bond)
+        batch_size, n_nodes, n_bond = edge_attr_logits.shape[0], edge_attr_logits.shape[1], edge_attr_logits.shape[3]
+        diagonal_mask = torch.eye(n_nodes).unsqueeze(0).expand(batch_size, -1, -1).bool().to(edge_attr_logits.device)
+
+        for bond_type in range(n_bond-1):  # first indices are bond types
+            edge_attr_logits[:, :, :, bond_type][diagonal_mask] = -1000.0
+        edge_attr_logits[:, :, :, n_bond-1][diagonal_mask] = 1000.0 # last index is "no bond"
+
+        # symmetry: take average of i->j and j->i predictions
         edge_attr_logits = 0.5 * (edge_attr_logits + edge_attr_logits.transpose(1, 2))
 
         return edge_attr_logits  # sigmoid + mask + BCEWithLogitsLoss outside
