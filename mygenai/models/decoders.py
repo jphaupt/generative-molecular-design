@@ -4,6 +4,9 @@ from torch.nn import Linear, ReLU, BatchNorm1d, Module, Sequential, Sigmoid, Tan
 import torch.nn.functional as F
 from torch import nn
 from mygenai.models.layers import EquivariantMPNNLayer
+
+HUGE_FLOAT = 1e3
+
 class GraphDecoder(Module):
     def __init__(self, latent_dim, emb_dim=32, num_nodes=29):
         """
@@ -27,7 +30,7 @@ class GraphDecoder(Module):
             nn.Linear(emb_dim, 5)  # 4 bond types + 1 for no bond
         )
 
-    def forward(self, z):
+    def forward(self, z, num_real_atoms):
         """
         z: (batch_size, num_nodes, latent_dim)
         Returns:
@@ -52,20 +55,33 @@ class GraphDecoder(Module):
         diagonal_mask = torch.eye(n_nodes).unsqueeze(0).expand(batch_size, -1, -1).bool().to(edge_attr_logits.device)
 
         for bond_type in range(n_bond-1):  # first indices are bond types
-            edge_attr_logits[:, :, :, bond_type][diagonal_mask] = float('-inf')
-        edge_attr_logits[:, :, :, n_bond-1][diagonal_mask] = float('inf') # last index is "no bond"
+            edge_attr_logits[:, :, :, bond_type][diagonal_mask] = -HUGE_FLOAT
+        edge_attr_logits[:, :, :, n_bond-1][diagonal_mask] = HUGE_FLOAT
 
-        # mask edges involving padding atoms
-        real_atoms = torch.zeros(n_nodes, dtype=torch.bool).to(edge_attr_logits.device)
-        real_atoms[:-1] = True # FIXME this is a bug: it makes all atoms real except the last one, but e.g. for water it's only the first 3
+        if isinstance(num_real_atoms, torch.Tensor) and num_real_atoms.numel() > 1:
+            # batch-specific masks for each graph
+            real_atoms_mask = torch.zeros(batch_size, n_nodes, dtype=torch.bool, device=edge_attr_logits.device)
+            for b in range(batch_size):
+                real_atoms_mask[b, :num_real_atoms[b]] = True
 
-        pad_mask_i = (~real_atoms).unsqueeze(1).expand(n_nodes, n_nodes)
-        pad_mask_j = (~real_atoms).unsqueeze(0).expand(n_nodes, n_nodes)
-        padding_mask = (pad_mask_i | pad_mask_j).unsqueeze(0).expand(batch_size, -1, -1)
+            # padding masks for all graphs at once
+            pad_mask = ~real_atoms_mask
+            pad_mask_i = pad_mask.unsqueeze(2).expand(-1, -1, n_nodes)
+            pad_mask_j = pad_mask.unsqueeze(1).expand(-1, n_nodes, -1)
+            padding_mask = pad_mask_i | pad_mask_j
+        else:
+            # single graph case
+            num_real = num_real_atoms if isinstance(num_real_atoms, int) else num_real_atoms.item()
+            real_atoms = torch.zeros(n_nodes, dtype=torch.bool, device=edge_attr_logits.device)
+            real_atoms[:num_real] = True
+
+            pad_mask_i = (~real_atoms).unsqueeze(1).expand(n_nodes, n_nodes)
+            pad_mask_j = (~real_atoms).unsqueeze(0).expand(n_nodes, n_nodes)
+            padding_mask = (pad_mask_i | pad_mask_j).unsqueeze(0).expand(batch_size, -1, -1)
 
         for bond_type in range(n_bond-1):
-            edge_attr_logits[:, :, :, bond_type][padding_mask] = float('-inf')
-        edge_attr_logits[:, :, :, n_bond-1][padding_mask] = float('inf')
+            edge_attr_logits[:, :, :, bond_type][padding_mask] = -HUGE_FLOAT
+        edge_attr_logits[:, :, :, n_bond-1][padding_mask] = HUGE_FLOAT
 
         # symmetry: take average of i->j and j->i predictions
         edge_attr_logits = 0.5 * (edge_attr_logits + edge_attr_logits.transpose(1, 2))

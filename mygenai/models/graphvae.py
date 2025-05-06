@@ -22,11 +22,11 @@ class GraphVAE(Module):
     def forward(self, node_feats):
         mu, logvar, property_pred = self.encoder(node_feats)
         z = self.reparameterize(mu, logvar)
-        logits = self.decoder(z)
+        logits = self.decoder(z, node_feats.num_real_atoms)
         return logits, mu, logvar, property_pred
 
     def loss_function(self, edge_attr_logits, batch):
-        # create ground-truth adjacency matrices using PyG utility
+        # Create ground-truth adjacency matrices using PyG utility
         adj_target = to_dense_adj(
             batch.edge_index,
             batch=batch.batch,
@@ -34,9 +34,39 @@ class GraphVAE(Module):
             edge_attr=batch.edge_attr
         )
 
-        # binary cross entropy for adjacency matrix reconstruction
-        recon_loss = F.binary_cross_entropy_with_logits(edge_attr_logits, adj_target)
+        # Create masks for bonds we want to exclude from loss
+        batch_size, n_nodes = edge_attr_logits.shape[0], edge_attr_logits.shape[1]
+        device = edge_attr_logits.device  # Get the device of input tensors
 
-        return recon_loss
+        # diagonal mask (self-bonds)
+        diag_mask = torch.eye(n_nodes, device=device).unsqueeze(0).expand(batch_size, -1, -1).bool()
+
+        # Padding node mask
+        padding_mask = torch.zeros(batch_size, n_nodes, n_nodes, dtype=torch.bool, device=device)
+
+        if hasattr(batch, 'num_real_atoms'):
+            for b in range(batch_size):
+                num_real = batch.num_real_atoms[b]
+                # Create padding_nodes tensor on the right device
+                padding_nodes = torch.arange(n_nodes, device=device) >= num_real
+                # Use boolean operations on device-matched tensors
+                padding_mask[b] = padding_nodes.unsqueeze(0) | padding_nodes.unsqueeze(1)
+
+        # Combined mask of bonds to ignore in loss
+        ignore_mask = diag_mask | padding_mask
+
+        # Create inverse mask for bonds we want to consider
+        consider_mask = ~ignore_mask
+
+        # Expand consider_mask to match dimensions for indexing
+        consider_mask_expanded = consider_mask.unsqueeze(-1).expand(-1, -1, -1, adj_target.size(-1))
+
+        # Calculate loss only on non-masked elements
+        pred_flat = torch.masked_select(edge_attr_logits, consider_mask_expanded)
+        target_flat = torch.masked_select(adj_target, consider_mask_expanded)
+
+        loss = F.binary_cross_entropy_with_logits(pred_flat, target_flat)
+
+        return loss
 
 # TODO interpret molecular graph function

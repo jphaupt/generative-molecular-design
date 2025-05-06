@@ -57,57 +57,6 @@ class CompleteGraph(object):
 
         return data
 
-# class CompleteGraph(object):
-#     """
-#     This transform adds all pairwise edges into the edge index per data sample,
-#     then removes self loops, i.e. it builds a fully connected or complete graph
-#     """
-#     def __call__(self, data):
-#         # Determine which nodes are real by checking the padding feature
-#         # The last column in data.x indicates padding (1 = padding node, 0 = real node)
-#         is_padding = data.x[:, -1] > 0.5
-#         current_nodes = (~is_padding).sum().item()
-
-#         # Create complete graph
-#         num_nodes = data.num_nodes
-#         row = torch.arange(num_nodes, dtype=torch.long, device=data.x.device)
-#         col = torch.arange(num_nodes, dtype=torch.long, device=data.x.device)
-
-#         row = row.view(-1, 1).repeat(1, num_nodes).view(-1)
-#         col = col.repeat(num_nodes)
-#         edge_index = torch.stack([row, col], dim=0)
-
-#         # Handle edge attributes
-#         edge_attr = None
-#         if data.edge_attr is not None:
-#             idx = data.edge_index[0] * num_nodes + data.edge_index[1]
-#             size = list(data.edge_attr.size())
-#             size[0] = num_nodes * num_nodes
-#             edge_attr = data.edge_attr.new_zeros(size)
-#             edge_attr[idx] = data.edge_attr
-
-#         # Remove self-loops
-#         edge_index, edge_attr = remove_self_loops(edge_index, edge_attr)
-#         data.edge_attr = edge_attr
-#         data.edge_index = edge_index
-
-#         # Now add a "padding_edge" feature to edge attributes
-#         if data.edge_attr is not None:
-#             # Get indices of edges between real nodes
-#             real_node_mask = ~is_padding
-
-#             # Identify real edges (both endpoints are real nodes)
-#             # TODO this is not correct, since there might be no edges between two real nodes (i.e. no bonds)
-#             src_real = real_node_mask[data.edge_index[0]]
-#             dst_real = real_node_mask[data.edge_index[1]]
-#             real_edges = src_real & dst_real
-
-#             # Add "is_padding_edge" feature (0 for real edges, 1 for padding)
-#             padding_feature = (~real_edges).float().unsqueeze(1)
-#             data.edge_attr = torch.cat([data.edge_attr, padding_feature], dim=1)
-
-#         return data
-
 class AddEdgeExistence(object):
     """
     This transform adds an edge_existence attribute to the data object.
@@ -135,6 +84,7 @@ class PadToFixedSize(object):
     def __call__(self, data):
         # Current number of nodes
         current_nodes = data.num_nodes
+        data.num_real_atoms = current_nodes
 
         # If graph is already the right size, do nothing
         if current_nodes == self.num_nodes:

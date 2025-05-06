@@ -116,26 +116,31 @@ Document git hashes and use git tags for when each model version is done.
  - unit tests!
    - [x] tensor dimension matches
    - [x] unit test training functions (a few epoches training, validate, test)
-   - [ ] reasonable loss values
    - [x] NaN values in the model outputs or loss
    - [x] check forward pass for all models succeed
-   - [ ] have several different choices for inputs (e.g. dimensions)
-   - [ ] fixtures
+   - [x] fixtures
      - [x] QM9 dataset (with various transforms)
      - [x] dataloader
      - [x] single batch
-     - [ ] test transformations
-       - [ ] in particular, check that a molecule from a transformed dataset looks the way you expect
-     - [ ] single molecule
+     - [x] test transformations
+       - [x] in particular, check that a molecule from a transformed dataset looks the way you expect
+     - [x] single molecule
      - [ ] random dataset
 
 After struggling for hours on a model only to realise the problem was in how the data was preprocessed, I think it is imperative to add, which I somehow overlooked:
  - [ ] unit tests for transforms
    - [ ] sanity checks (e.g. dimensions)
    - [ ] take a known molecule (e.g. water) and feed it in, you should know the exact output; verify that it matches expectations!
+ - [x] no self-bonds
+ - [x] no bonds involving padding nodes
+ - [x] ensure forward pass succeeds with no errors
+ - [x] weighted loss function
+ - [ ] introduce valence constraints (e.g. O has 2 valence)
+
 
 ### v0.1
 
+ - Variable-size graphs(!!)
  - GINEConv Encoder -- produce edge attributes (not just existence), introduces edge_attr
  - Reconstruct both edges and nodes, where in each case there is a padded "empty" one-hot encodding (i.e. no bond or no atom)
  - Unit tests

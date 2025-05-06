@@ -3,6 +3,22 @@
 
 import copy, torch
 
+def test_forward_pass(v0_model, v0_single_batch):
+    try:
+        with torch.no_grad():
+            outputs = v0_model(v0_single_batch)
+        # if we get here, no error was raised, so the test passes
+    except Exception as e:
+        assert False, f"Forward pass failed with error: {e}"
+
+def test_overfit_h2o(v0_model, water, device):
+    assert False, "Placeholder"
+
+def test_overfit_ch3cn(v0_model, ch3cn, device):
+    # this molecule is a bit more complicated than h2o and has a triple bond
+    assert False, "Placeholder"
+
+
 def test_overfit_single_molecule(v0_model, v0_single_batch, device):
     """Test that the model can overfit to a single molecule."""
     assert False, "Placeholder: first playing with this in a notebook"
